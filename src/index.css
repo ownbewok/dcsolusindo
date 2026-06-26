@@ -1,0 +1,51 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  --color-white: var(--color-custom-white);
+  --color-slate-50: var(--color-custom-slate-50);
+  --color-slate-100: var(--color-custom-slate-100);
+  --color-slate-200: var(--color-custom-slate-200);
+  --color-slate-300: var(--color-custom-slate-300);
+  --color-slate-400: var(--color-custom-slate-400);
+  --color-slate-500: var(--color-custom-slate-500);
+  --color-slate-600: var(--color-custom-slate-600);
+  --color-slate-700: var(--color-custom-slate-700);
+  --color-slate-800: var(--color-custom-slate-800);
+  --color-slate-900: var(--color-custom-slate-900);
+  --color-slate-950: var(--color-custom-slate-955);
+}
+
+:root {
+  --color-custom-white: #ffffff;
+  --color-custom-slate-50: #f8fafc;
+  --color-custom-slate-100: #f1f5f9;
+  --color-custom-slate-200: #e2e8f0;
+  --color-custom-slate-300: #cbd5e1;
+  --color-custom-slate-400: #94a3b8;
+  --color-custom-slate-500: #64748b;
+  --color-custom-slate-600: #475569;
+  --color-custom-slate-700: #334155;
+  --color-custom-slate-800: #1e293b;
+  --color-custom-slate-900: #0f172a;
+  --color-custom-slate-955: #020617;
+}
+
+:root.dark {
+  --color-custom-white: #111827; /* deep dark grey card */
+  --color-custom-slate-50: #030712; /* ultra dark page bg */
+  --color-custom-slate-100: #1f2937; /* borders / subtle dividers */
+  --color-custom-slate-200: #374151; /* input/button borders */
+  --color-custom-slate-300: #4b5563;
+  --color-custom-slate-400: #9ca3af; /* muted description texts */
+  --color-custom-slate-500: #cbd5e1;
+  --color-custom-slate-600: #e5e7eb;
+  --color-custom-slate-700: #f3f4f6;
+  --color-custom-slate-800: #f9fafb; /* text readability */
+  --color-custom-slate-900: #ffffff; /* title texts */
+  --color-custom-slate-955: #ffffff;
+}
+

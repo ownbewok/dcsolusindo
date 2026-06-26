@@ -1,0 +1,182 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React from 'react';
+import { CartItem } from '../types';
+import { X, Trash2, ShieldAlert, ShoppingBag, ArrowRight, Plus, Minus } from 'lucide-react';
+
+interface CartDrawerProps {
+  cart: CartItem[];
+  isOpen: boolean;
+  onClose: () => void;
+  onRemoveFromCart: (productId: string) => void;
+  onUpdateQuantity: (productId: string, quantity: number) => void;
+  onCheckout: () => void;
+}
+
+export const CartDrawer: React.FC<CartDrawerProps> = ({
+  cart,
+  isOpen,
+  onClose,
+  onRemoveFromCart,
+  onUpdateQuantity,
+  onCheckout,
+}) => {
+  if (!isOpen) return null;
+
+  const totalPrice = cart.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
+
+  const formattedPrice = (price: number) => {
+    return new Intl.NumberFormat('id-ID', {
+      style: 'currency',
+      currency: 'IDR',
+      maximumFractionDigits: 0,
+    }).format(price);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-hidden" id="cart-drawer">
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-xs transition-opacity" onClick={onClose}></div>
+
+      <div className="absolute inset-y-0 right-0 max-w-full flex pl-10">
+        <div className="w-screen max-w-md bg-white shadow-2xl flex flex-col h-full transform transition-all">
+          {/* Header */}
+          <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
+            <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+              <ShoppingBag className="w-5 h-5 text-sky-600" /> Keranjang Belanja ({cart.length})
+            </h2>
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-50 transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          {/* Cart Content */}
+          <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+            {cart.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center text-center py-20">
+                <ShoppingBag className="w-12 h-12 text-slate-200 mb-4" />
+                <h3 className="text-sm font-bold text-slate-800">Keranjang Anda kosong</h3>
+                <p className="text-xs text-slate-400 max-w-xs mt-1.5">
+                  Jelajahi produk digital terbaik kami, tambahkan lisensi software, template, atau aset desain ke keranjang untuk memulai.
+                </p>
+                <button
+                  onClick={onClose}
+                  className="mt-6 px-5 py-2.5 bg-slate-900 hover:bg-sky-600 text-white font-bold text-xs rounded-xl transition-colors cursor-pointer"
+                >
+                  Mulai Belanja
+                </button>
+              </div>
+            ) : (
+              cart.map((item) => (
+                <div
+                  key={item.product.id}
+                  className="flex items-start gap-4 p-3 bg-slate-50/50 hover:bg-slate-50 rounded-xl border border-slate-100 transition-colors"
+                >
+                  <img
+                    src={item.product.image}
+                    alt={item.product.name}
+                    className="w-16 aspect-video object-cover rounded-lg border border-slate-200 shrink-0"
+                    referrerPolicy="no-referrer"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <span className="text-[9px] font-bold text-sky-600 uppercase tracking-wider">
+                      {item.product.category}
+                    </span>
+                    <h4 className="text-xs font-bold text-slate-800 line-clamp-1 mt-0.5">
+                      {item.product.name}
+                    </h4>
+                    <div className="text-[10px] text-slate-400 mt-0.5">
+                      Tipe: {item.product.licenseType}
+                    </div>
+                    <div className="flex items-center justify-between mt-3">
+                      <div className="text-xs font-bold text-slate-900">
+                        {formattedPrice(item.product.price)}
+                      </div>
+                      
+                      {/* Quantity Controls */}
+                      <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-lg p-0.5 shadow-2xs">
+                        <button
+                          type="button"
+                          onClick={() => onUpdateQuantity(item.product.id, item.quantity - 1)}
+                          disabled={item.quantity <= 1}
+                          className="p-1 rounded-md hover:bg-slate-50 text-slate-500 hover:text-slate-800 disabled:opacity-30 disabled:hover:bg-transparent transition-colors cursor-pointer"
+                          title="Kurangi Jumlah"
+                        >
+                          <Minus className="w-3 h-3" />
+                        </button>
+                        <span className="text-xs font-black text-slate-800 w-6 text-center select-none">
+                          {item.quantity}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => onUpdateQuantity(item.product.id, item.quantity + 1)}
+                          disabled={item.product.licenseKeysPool.length > 0 && item.quantity >= item.product.licenseKeysPool.length}
+                          className="p-1 rounded-md hover:bg-slate-50 text-slate-500 hover:text-slate-800 disabled:opacity-30 disabled:hover:bg-transparent transition-colors cursor-pointer"
+                          title={
+                            item.product.licenseKeysPool.length > 0 && item.quantity >= item.product.licenseKeysPool.length
+                              ? "Stok lisensi habis"
+                              : "Tambah Jumlah"
+                          }
+                        >
+                          <Plus className="w-3 h-3" />
+                        </button>
+                      </div>
+                    </div>
+                    {item.quantity > 1 && (
+                      <div className="text-[10px] text-sky-600 font-semibold mt-1 font-mono">
+                        Subtotal: {formattedPrice(item.product.price * item.quantity)}
+                      </div>
+                    )}
+                    {item.product.licenseKeysPool.length > 0 && item.quantity >= item.product.licenseKeysPool.length && (
+                      <div className="text-[9px] text-amber-600 font-medium mt-1 leading-none">
+                        ⚠️ Maksimal stok tersedia ({item.product.licenseKeysPool.length})
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => onRemoveFromCart(item.product.id)}
+                    className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition-colors cursor-pointer shrink-0 self-center"
+                    title="Hapus Item"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* Footer (Total and Checkout) */}
+          {cart.length > 0 && (
+            <div className="border-t border-slate-100 p-6 space-y-4 bg-slate-50/70">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-slate-500 font-medium">Subtotal</span>
+                <span className="font-extrabold text-slate-950 text-base">{formattedPrice(totalPrice)}</span>
+              </div>
+
+              <div className="bg-sky-50 rounded-lg p-3 border border-sky-100 flex items-start gap-2">
+                <ShieldAlert className="w-4 h-4 text-sky-600 mt-0.5 shrink-0" />
+                <span className="text-[10px] text-sky-700 leading-normal">
+                  Semua transaksi diproses secara instan. Produk digital dikirimkan langsung ke email Anda dan terbit di Vault setelah pembayaran lunas.
+                </span>
+              </div>
+
+              <button
+                onClick={onCheckout}
+                className="w-full py-3.5 bg-slate-900 hover:bg-sky-600 text-white font-bold text-xs rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 shadow-xs group"
+              >
+                Lanjutkan ke Pembayaran
+                <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};

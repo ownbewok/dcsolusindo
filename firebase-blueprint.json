@@ -1,0 +1,148 @@
+{
+  "entities": {
+    "Product": {
+      "title": "Product",
+      "description": "Information about a digital product in the marketplace",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "price": { "type": "number" },
+        "image": { "type": "string" },
+        "fileUrl": { "type": "string" },
+        "fileSize": { "type": "string" },
+        "rating": { "type": "number" },
+        "reviewsCount": { "type": "number" },
+        "sellerName": { "type": "string" },
+        "licenseType": { "type": "string" },
+        "isFeatured": { "type": "boolean" },
+        "licenseKeysPool": { "type": "array" }
+      },
+      "required": ["id", "name", "price"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Record of a digital product purchase transaction",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "buyerName": { "type": "string" },
+        "buyerEmail": { "type": "string" },
+        "buyerPhone": { "type": "string" },
+        "items": { "type": "array" },
+        "totalPrice": { "type": "number" },
+        "paymentMethod": { "type": "string" },
+        "paymentStatus": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "paymentConfirmedAt": { "type": "string" },
+        "fileDownloaded": { "type": "boolean" },
+        "emailSent": { "type": "boolean" },
+        "senderBank": { "type": "string" },
+        "senderName": { "type": "string" },
+        "senderNotes": { "type": "string" },
+        "paymentProof": { "type": "string" }
+      },
+      "required": ["id", "buyerEmail", "totalPrice", "paymentStatus"]
+    },
+    "Review": {
+      "title": "Review",
+      "description": "Buyer review and rating for a product",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "productId": { "type": "string" },
+        "buyerName": { "type": "string" },
+        "rating": { "type": "number" },
+        "comment": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "productId", "buyerName", "rating", "comment"]
+    },
+    "SystemLog": {
+      "title": "SystemLog",
+      "description": "System events and notification logs",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "recipientEmail": { "type": "string" },
+        "details": { "type": "string" }
+      },
+      "required": ["id", "type", "title", "timestamp"]
+    },
+    "Complaint": {
+      "title": "Complaint",
+      "description": "Customer service complaint or ticket",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "buyerName": { "type": "string" },
+        "buyerEmail": { "type": "string" },
+        "transactionId": { "type": "string" },
+        "category": { "type": "string" },
+        "message": { "type": "string" },
+        "status": { "type": "string" },
+        "replyMessage": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "buyerName", "buyerEmail", "category", "message", "status", "createdAt"]
+    },
+    "PromoCode": {
+      "title": "PromoCode",
+      "description": "Store discount and promo codes",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "code": { "type": "string" },
+        "type": { "type": "string" },
+        "value": { "type": "number" },
+        "minPurchase": { "type": "number" },
+        "maxDiscount": { "type": "number" },
+        "isActive": { "type": "boolean" },
+        "expiryDate": { "type": "string" },
+        "usageLimit": { "type": "number" },
+        "usageCount": { "type": "number" }
+      },
+      "required": ["id", "code", "type", "value", "isActive"]
+    }
+  },
+  "firestore": {
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "Collection of available digital products"
+    },
+    "/promo_codes/{promoId}": {
+      "schema": "PromoCode",
+      "description": "Collection of store discount and promo codes"
+    },
+    "/transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "Purchased transactions record"
+    },
+    "/reviews/{reviewId}": {
+      "schema": "Review",
+      "description": "Product reviews from buyers"
+    },
+    "/system_logs/{logId}": {
+      "schema": "SystemLog",
+      "description": "System event audit trail"
+    },
+    "/complaints/{complaintId}": {
+      "schema": "Complaint",
+      "description": "User customer service and support complaints"
+    },
+    "/config/{configId}": {
+      "schema": "object",
+      "description": "Generic store configuration documents"
+    },
+    "/uploads/{uploadId}": {
+      "schema": "object",
+      "description": "Temporary uploaded payment proof documents"
+    }
+  }
+}

@@ -1,0 +1,20 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { initializeApp } from 'firebase/app';
+import { getFirestore } from 'firebase/firestore';
+
+const firebaseConfig = {
+  projectId: "horizontal-quarter-n79b0",
+  appId: "1:100324967497:web:c0d80d10c2e5cd3e2feb98",
+  apiKey: "AIzaSyCv-o1P_LxIqNAIPTWYRQSLie7bLW2uVKs",
+  authDomain: "horizontal-quarter-n79b0.firebaseapp.com",
+  firestoreDatabaseId: "ai-studio-7d9b1f02-aeec-43bf-bcb9-bf041e7543cf",
+  storageBucket: "horizontal-quarter-n79b0.firebasestorage.app",
+  messagingSenderId: "100324967497"
+};
+
+const app = initializeApp(firebaseConfig);
+export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);

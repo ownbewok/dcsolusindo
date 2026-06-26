@@ -1,0 +1,6 @@
+{
+  "name": "DigitalMarket",
+  "description": "Marketplace produk digital (lisensi software, template, aset kreatif) dengan pembayaran otomatis, pengiriman instan, lisensi terenkripsi, rating, ulasan, serta dashboard admin dan analitik seller real-time.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
