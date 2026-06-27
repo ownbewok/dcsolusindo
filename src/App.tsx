@@ -1893,10 +1893,21 @@ export default function App() {
               </div>
               <div>
                 <h4 className="text-sm font-bold text-amber-800 dark:text-amber-300 tracking-tight flex items-center gap-1.5">
-                  ⚠️ Kuota Database Terlampaui — Mode Fallback Lokal Aktif
+                  {firebaseError.toLowerCase().includes('permission') || firebaseError.toLowerCase().includes('insufficient')
+                    ? '⚠️ Masalah Izin (Security Rules) — Mode Fallback Lokal Aktif'
+                    : '⚠️ Masalah Koneksi / Kuota Database — Mode Fallback Lokal Aktif'}
                 </h4>
                 <p className="text-xs text-slate-600 dark:text-slate-400 mt-1.5 leading-relaxed max-w-4xl">
-                  Firestore Cloud Database telah mencapai batas penggunaan gratis harian ({firebaseError.includes('quota') || firebaseError.includes('exhausted') ? 'Quota limit exceeded' : firebaseError}). 
+                  {firebaseError.toLowerCase().includes('permission') || firebaseError.toLowerCase().includes('insufficient') ? (
+                    <>
+                      Firestore Cloud Database menolak akses (<strong>Missing or insufficient permissions</strong>).
+                      Ini terjadi karena Anda menggunakan project Firebase Anda sendiri (<strong>fir-ownbewok</strong>) dengan ID database <strong>ai-studio-7d9b1f02-aeec-43bf-bcb9-bf041e7543cf</strong>, namun belum menyetel Firestore Security Rules di konsol Firebase Anda agar mengizinkan akses baca dan tulis.
+                    </>
+                  ) : (
+                    <>
+                      Firestore Cloud Database telah mencapai batas penggunaan gratis harian ({firebaseError.includes('quota') || firebaseError.includes('exhausted') ? 'Quota limit exceeded' : firebaseError}).
+                    </>
+                  )}
                   <span className="block mt-1 font-semibold text-slate-800 dark:text-slate-300">
                     Sistem secara otomatis mengaktifkan Mode Sandbox Offline (Local Storage). Anda tetap dapat membuat transaksi simulasi, mengelola produk, menulis ulasan, mengirim pesan silaturahmi, dan mengubah pengaturan secara penuh dengan lancar dan aman di browser Anda!
                   </span>
