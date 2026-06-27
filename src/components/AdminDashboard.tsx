@@ -3193,14 +3193,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           }
                         })
                       });
-                      const resData = await response.json();
+                      const resText = await response.text();
+                      let resData;
+                      try {
+                        resData = JSON.parse(resText);
+                      } catch (parseErr) {
+                        throw new Error(`Server mengembalikan respon non-JSON (HTML/Error Server). Status: ${response.status} ${response.statusText}. Respon: ${resText.substring(0, 200)}...`);
+                      }
                       if (response.ok && resData.success) {
                         alert(`🎉 Sukses! Layanan ${isBrevo ? 'Brevo API' : 'SMTP'} berhasil tersambung & Email test terkirim ke ${testEmail}.`);
                       } else {
                         alert(`❌ Gagal tersambung ke Layanan:\n${resData.error || 'Terjadi kesalahan sistem.'}`);
                       }
                     } catch (testErr: any) {
-                      alert(`❌ Gagal menghubungi server atau timeout:\n${testErr.message || testErr}`);
+                      alert(`❌ Gagal menghubungi server SMTP atau Backend:\n${testErr.message || testErr}`);
                     }
                   }}
                   className="px-4 py-2 border border-sky-200 bg-sky-50 hover:bg-sky-100 text-sky-700 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"

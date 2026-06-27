@@ -427,11 +427,12 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
         }),
       });
 
+      const resText = await response.text();
       let data;
       try {
-        data = await response.json();
+        data = JSON.parse(resText);
       } catch (jsonErr) {
-        throw new Error('Server sedang melakukan pembaruan otomatis/restart. Silakan tunggu sekitar 5-10 detik lalu coba kirim kembali.');
+        throw new Error(`Server mengembalikan respon tidak valid (non-JSON). Status: ${response.status} ${response.statusText}. Silakan coba beberapa detik lagi.`);
       }
 
       if (response.ok && data.success) {

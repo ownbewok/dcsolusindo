@@ -505,7 +505,14 @@ export default function App() {
   const handleGithubLogin = async () => {
     try {
       const res = await fetch('/api/auth/github-url');
-      const data = await res.json();
+      const resText = await res.text();
+      let data;
+      try {
+        data = JSON.parse(resText);
+      } catch (jsonErr) {
+        alert("Server mengembalikan respon tidak valid saat memuat URL GitHub.");
+        return;
+      }
       if (!res.ok) {
         alert(data.error || "Gagal memulai autentikasi GitHub.");
         return;
@@ -1001,11 +1008,12 @@ export default function App() {
           brevoSenderEmail: branding.brevoSenderEmail || '',
         }),
       });
+      const resText = await response.text();
       let data;
       try {
-        data = await response.json();
+        data = JSON.parse(resText);
       } catch (jsonErr) {
-        throw new Error('Server sedang melakukan pembaruan otomatis/restart. Silakan tunggu beberapa detik.');
+        throw new Error(`Server mengembalikan respon tidak valid (non-JSON). Status: ${response.status} ${response.statusText}.`);
       }
       if (response.ok && data.success) {
         console.log(`Email sukses terkirim ke ${trx.buyerEmail}`);
@@ -1050,11 +1058,12 @@ export default function App() {
             brevoSenderEmail: branding.brevoSenderEmail || '',
           }),
         });
+        const resText = await response.text();
         let data;
         try {
-          data = await response.json();
+          data = JSON.parse(resText);
         } catch (jsonErr) {
-          throw new Error('Server sedang melakukan pembaruan otomatis/restart.');
+          throw new Error(`Server mengembalikan respon tidak valid (non-JSON). Status: ${response.status} ${response.statusText}.`);
         }
         if (response.ok && data.success) {
           console.log(`Email notifikasi pesanan berhasil dikirim ke Admin ${admin.fullName} (${admin.email})`);

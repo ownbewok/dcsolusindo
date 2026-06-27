@@ -44,51 +44,51 @@ app.post("/api/send-email", async (req, res) => {
   let fromEmail = "no-reply@digimarket.com";
   let usingCustomSMTP = false;
 
-  if (activeEmailService === "smtp") {
-    if (smtpConfig && smtpConfig.host && smtpConfig.user && smtpConfig.password) {
-      usingCustomSMTP = true;
-      const portNum = parseInt(smtpConfig.port, 10) || (smtpConfig.secure ? 465 : 587);
-      transporter = nodemailer.createTransport({
-        host: smtpConfig.host,
-        port: portNum,
-        secure: smtpConfig.secure !== undefined ? smtpConfig.secure : (portNum === 465),
-        auth: {
-          user: smtpConfig.user,
-          pass: smtpConfig.password,
-        },
-      });
-      fromEmail = smtpConfig.user;
-    } else {
-      const gmailUser = process.env.GMAIL_USER;
-      const gmailAppPassword = process.env.GMAIL_APP_PASSWORD;
+  try {
+    if (activeEmailService === "smtp") {
+      if (smtpConfig && smtpConfig.host && smtpConfig.user && smtpConfig.password) {
+        usingCustomSMTP = true;
+        const portNum = parseInt(smtpConfig.port, 10) || (smtpConfig.secure ? 465 : 587);
+        transporter = nodemailer.createTransport({
+          host: smtpConfig.host,
+          port: portNum,
+          secure: smtpConfig.secure !== undefined ? smtpConfig.secure : (portNum === 465),
+          auth: {
+            user: smtpConfig.user,
+            pass: smtpConfig.password,
+          },
+        });
+        fromEmail = smtpConfig.user;
+      } else {
+        const gmailUser = process.env.GMAIL_USER;
+        const gmailAppPassword = process.env.GMAIL_APP_PASSWORD;
 
-      if (!gmailUser || !gmailAppPassword) {
+        if (!gmailUser || !gmailAppPassword) {
+          return res.status(400).json({
+            success: false,
+            error: "Fitur pengiriman email belum aktif karena SMTP belum dikonfigurasi di Setingan Toko (oleh Admin) maupun di server (GMAIL_USER & GMAIL_APP_PASSWORD).\n\n" +
+                   "Silakan masuk ke Admin Dashboard -> Setingan Toko untuk mengisi konfigurasi SMTP Server Anda sendiri."
+          });
+        }
+
+        transporter = nodemailer.createTransport({
+          service: "gmail",
+          auth: {
+            user: gmailUser,
+            pass: gmailAppPassword,
+          },
+        });
+        fromEmail = gmailUser;
+      }
+    } else if (activeEmailService === "brevo") {
+      if (!activeBrevoApiKey) {
         return res.status(400).json({
           success: false,
-          error: "Fitur pengiriman email belum aktif karena SMTP belum dikonfigurasi di Setingan Toko (oleh Admin) maupun di server (GMAIL_USER & GMAIL_APP_PASSWORD).\n\n" +
-                 "Silakan masuk ke Admin Dashboard -> Setingan Toko untuk mengisi konfigurasi SMTP Server Anda sendiri."
+          error: "Fitur pengiriman email belum aktif karena API Key Brevo belum dikonfigurasi di Setingan Toko maupun di server (BREVO_API_KEY)."
         });
       }
-
-      transporter = nodemailer.createTransport({
-        service: "gmail",
-        auth: {
-          user: gmailUser,
-          pass: gmailAppPassword,
-        },
-      });
-      fromEmail = gmailUser;
     }
-  } else if (activeEmailService === "brevo") {
-    if (!activeBrevoApiKey) {
-      return res.status(400).json({
-        success: false,
-        error: "Fitur pengiriman email belum aktif karena API Key Brevo belum dikonfigurasi di Setingan Toko maupun di server (BREVO_API_KEY)."
-      });
-    }
-  }
 
-  try {
     const isPending = !paymentStatus || paymentStatus === "PENDING" || paymentStatus === "VERIFYING" || paymentStatus !== "SUCCESS";
 
     // Build items HTML list
@@ -295,50 +295,50 @@ app.post("/api/send-admin-notification", async (req, res) => {
   let fromEmail = "no-reply@digimarket.com";
   let usingCustomSMTP = false;
 
-  if (activeEmailService === "smtp") {
-    if (smtpConfig && smtpConfig.host && smtpConfig.user && smtpConfig.password) {
-      usingCustomSMTP = true;
-      const portNum = parseInt(smtpConfig.port, 10) || (smtpConfig.secure ? 465 : 587);
-      transporter = nodemailer.createTransport({
-        host: smtpConfig.host,
-        port: portNum,
-        secure: smtpConfig.secure !== undefined ? smtpConfig.secure : (portNum === 465),
-        auth: {
-          user: smtpConfig.user,
-          pass: smtpConfig.password,
-        },
-      });
-      fromEmail = smtpConfig.user;
-    } else {
-      const gmailUser = process.env.GMAIL_USER;
-      const gmailAppPassword = process.env.GMAIL_APP_PASSWORD;
+  try {
+    if (activeEmailService === "smtp") {
+      if (smtpConfig && smtpConfig.host && smtpConfig.user && smtpConfig.password) {
+        usingCustomSMTP = true;
+        const portNum = parseInt(smtpConfig.port, 10) || (smtpConfig.secure ? 465 : 587);
+        transporter = nodemailer.createTransport({
+          host: smtpConfig.host,
+          port: portNum,
+          secure: smtpConfig.secure !== undefined ? smtpConfig.secure : (portNum === 465),
+          auth: {
+            user: smtpConfig.user,
+            pass: smtpConfig.password,
+          },
+        });
+        fromEmail = smtpConfig.user;
+      } else {
+        const gmailUser = process.env.GMAIL_USER;
+        const gmailAppPassword = process.env.GMAIL_APP_PASSWORD;
 
-      if (!gmailUser || !gmailAppPassword) {
+        if (!gmailUser || !gmailAppPassword) {
+          return res.status(400).json({
+            success: false,
+            error: "Fitur pengiriman email admin belum aktif karena SMTP Gmail belum dikonfigurasi di server."
+          });
+        }
+
+        transporter = nodemailer.createTransport({
+          service: "gmail",
+          auth: {
+            user: gmailUser,
+            pass: gmailAppPassword,
+          },
+        });
+        fromEmail = gmailUser;
+      }
+    } else if (activeEmailService === "brevo") {
+      if (!activeBrevoApiKey) {
         return res.status(400).json({
           success: false,
-          error: "Fitur pengiriman email admin belum aktif karena SMTP Gmail belum dikonfigurasi di server."
+          error: "Fitur pengiriman email belum aktif karena API Key Brevo belum dikonfigurasi."
         });
       }
-
-      transporter = nodemailer.createTransport({
-        service: "gmail",
-        auth: {
-          user: gmailUser,
-          pass: gmailAppPassword,
-        },
-      });
-      fromEmail = gmailUser;
     }
-  } else if (activeEmailService === "brevo") {
-    if (!activeBrevoApiKey) {
-      return res.status(400).json({
-        success: false,
-        error: "Fitur pengiriman email belum aktif karena API Key Brevo belum dikonfigurasi."
-      });
-    }
-  }
 
-  try {
     const itemsListHtml = items && Array.isArray(items) 
       ? items.map((item: any) => `
           <tr style="border-bottom: 1px solid #e2e8f0;">
@@ -823,6 +823,8 @@ async function startServer() {
   });
 }
 
-startServer();
-// Ekspor app agar bisa dibaca oleh serverless Vercel
+if (process.env.VERCEL !== "1") {
+  startServer();
+}
+
 export default app;
