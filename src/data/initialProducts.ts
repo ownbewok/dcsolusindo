@@ -21,6 +21,8 @@ export const initialProducts: Product[] = [
     licenseType: 'SaaS License',
     isFeatured: true,
     licenseKeysPool: ['DFPRO-9982-AXLM-2026', 'DFPRO-4731-KJND-8823', 'DFPRO-1049-QPWO-6744', 'DFPRO-5541-ZZXX-1122'],
+    originalPrice: 499000,
+    isDiscounted: true,
   },
   {
     id: 'prod-2',
@@ -37,6 +39,8 @@ export const initialProducts: Product[] = [
     licenseType: 'Single Use',
     isFeatured: true,
     licenseKeysPool: ['BENTOFIG-SINGLE-2026-XLM9', 'BENTOFIG-SINGLE-2026-KLP8', 'BENTOFIG-SINGLE-2026-PQO1'],
+    originalPrice: 129000,
+    isDiscounted: true,
   },
   {
     id: 'prod-3',
@@ -69,6 +73,8 @@ export const initialProducts: Product[] = [
     licenseType: 'Single Use',
     isFeatured: false,
     licenseKeysPool: ['BOOK-INDIE-PLAYBOOK-9912', 'BOOK-INDIE-PLAYBOOK-5561', 'BOOK-INDIE-PLAYBOOK-3012'],
+    originalPrice: 99000,
+    isDiscounted: true,
   },
   {
     id: 'prod-5',

@@ -18,6 +18,8 @@ export interface Product {
   licenseType: 'Single Use' | 'Commercial' | 'GPL' | 'SaaS License';
   isFeatured: boolean;
   licenseKeysPool: string[];
+  originalPrice?: number;
+  isDiscounted?: boolean;
 }
 
 export interface CartItem {
@@ -119,7 +121,13 @@ export interface ShopBranding {
   smtpUser?: string;
   smtpPassword?: string;
   smtpSecure?: boolean;
+  brevoApiKey?: string;
+  brevoSenderName?: string;
+  brevoSenderEmail?: string;
+  emailService?: 'smtp' | 'brevo';
   whatsappNumber?: string;
+  fontFamily?: 'inter' | 'ubuntu' | 'noteworthy';
+  productsLimit?: number;
 }
 
 export interface PaymentMethodConfig {
@@ -168,6 +176,15 @@ export interface GithubUser {
   name: string;
   email: string;
   avatar_url: string;
+}
+
+export interface SilaturahmiMessage {
+  id: string;
+  name: string;
+  message: string;
+  timestamp: string;
+  avatarColor: string;
+  role?: string;
 }
 
 

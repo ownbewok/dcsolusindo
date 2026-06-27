@@ -48,7 +48,9 @@ import {
   Search,
   Calendar,
   DollarSign,
-  ExternalLink
+  ExternalLink,
+  Save,
+  Type
 } from 'lucide-react';
 import { InvoiceModal } from './InvoiceModal';
 import { bulkPushToFirebase, syncToFirebase } from '../lib/firebaseSync';
@@ -82,6 +84,9 @@ interface AdminDashboardProps {
   onPurgeTransactions?: () => void;
   promoCodes: PromoCode[];
   onUpdatePromoCodes: (promoCodes: PromoCode[]) => void;
+  isAutosyncEnabled?: boolean;
+  setIsAutosyncEnabled?: (val: boolean) => void;
+  lastAutosyncTime?: string | null;
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
@@ -113,8 +118,56 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onPurgeTransactions,
   promoCodes,
   onUpdatePromoCodes,
+  isAutosyncEnabled,
+  setIsAutosyncEnabled,
+  lastAutosyncTime,
 }) => {
   const [activeTab, setActiveTab] = useState<'transactions' | 'products' | 'users' | 'logs' | 'settings' | 'complaints_payments' | 'promos'>('transactions');
+
+  // Local draft state for shop settings to avoid editing props and database syncing directly on keystroke
+  const [draftBranding, setDraftBranding] = useState<ShopBranding>(() => ({ ...branding }));
+  const [saveStatus, setSaveStatus] = useState<{ [key: string]: 'idle' | 'saving' | 'success' }>({
+    identity: 'idle',
+    skin: 'idle',
+    notes: 'idle',
+    smtp: 'idle',
+  });
+
+  // Keep draft in sync with outer changes if there are any
+  React.useEffect(() => {
+    setDraftBranding({ ...branding });
+  }, [branding]);
+
+  const handleSaveSettings = async (section: 'identity' | 'skin' | 'notes' | 'smtp') => {
+    setSaveStatus(prev => ({ ...prev, [section]: 'saving' }));
+    try {
+      // Apply update up to App.tsx which automatically persists and syncs
+      onUpdateBranding(draftBranding);
+      
+      if (onAddSystemLog) {
+        let sectionName = '';
+        if (section === 'identity') sectionName = 'Identitas & Branding';
+        if (section === 'skin') sectionName = 'Skin & Tema Visual';
+        if (section === 'notes') sectionName = 'Default Catatan Transaksi';
+        if (section === 'smtp') sectionName = 'SMTP Server Email';
+        
+        onAddSystemLog(
+          'system',
+          `Pembaruan Pengaturan: ${sectionName}`,
+          `Pengaturan toko bagian "${sectionName}" telah berhasil disimpan dan disinkronkan ke cloud.`
+        );
+      }
+      
+      setSaveStatus(prev => ({ ...prev, [section]: 'success' }));
+      setTimeout(() => {
+        setSaveStatus(prev => ({ ...prev, [section]: 'idle' }));
+      }, 3000);
+    } catch (err: any) {
+      console.error(err);
+      setSaveStatus(prev => ({ ...prev, [section]: 'idle' }));
+      alert(`Gagal menyimpan pengaturan: ${err.message || String(err)}`);
+    }
+  };
 
   // Derived customer database from transactions
   const clients = useMemo(() => {
@@ -1529,38 +1582,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </h3>
               
               <div className="flex items-center gap-2.5">
-                {transactions.length > 0 && onPurgeTransactions && (
-                  <button
-                    onClick={async () => {
-                      if (purgeConfirmStep === 0) {
-                        setPurgeConfirmStep(1);
-                        setTimeout(() => setPurgeConfirmStep(0), 4000);
-                      } else if (purgeConfirmStep === 1) {
-                        setPurgeConfirmStep(2);
-                        try {
-                          await onPurgeTransactions();
-                        } catch (err) {
-                          console.error(err);
-                        } finally {
-                          setPurgeConfirmStep(0);
-                        }
-                      }
-                    }}
-                    disabled={purgeConfirmStep === 2}
-                    className={`px-3.5 py-2 text-[10.5px] font-black rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-xs select-none ${
-                      purgeConfirmStep === 0
-                        ? 'bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-100'
-                        : purgeConfirmStep === 1
-                        ? 'bg-amber-500 hover:bg-amber-600 text-white animate-pulse'
-                        : 'bg-rose-200 text-rose-800 cursor-not-allowed'
-                    }`}
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    {purgeConfirmStep === 0 && 'Purge Transaksi'}
-                    {purgeConfirmStep === 1 && 'Klik Lagi untuk Konfirmasi Purge!'}
-                    {purgeConfirmStep === 2 && 'Membersihkan...'}
-                  </button>
-                )}
                 <button
                   onClick={openInvoiceForm}
                   className="px-3.5 py-2 bg-slate-900 hover:bg-sky-600 text-white text-[10.5px] font-black rounded-xl transition-colors cursor-pointer flex items-center gap-1.5 shadow-xs"
@@ -2038,9 +2059,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             >
               🛡️ Staff Administrator ({adminUsers.length})
             </button>
+            <button
+              type="button"
+              onClick={() => setUserSubTab('clients')}
+              className={`pb-2 text-xs font-bold transition-all border-b-2 cursor-pointer ${
+                userSubTab === 'clients'
+                  ? 'border-sky-600 text-sky-600 font-extrabold'
+                  : 'border-transparent text-slate-400 hover:text-slate-600'
+              }`}
+            >
+              👥 Database Client ({clients.length})
+            </button>
           </div>
 
-          {userSubTab === 'vault' ? (
+          {userSubTab === 'vault' && (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* Left Column: Add Vault User Form */}
               <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-xs h-fit">
@@ -2172,7 +2204,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
               </div>
             </div>
-          ) : (
+          )}
+
+          {userSubTab === 'admin' && (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in duration-150">
               {/* Left Column: Form Tambah/Edit Admin */}
               <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-xs h-fit">
@@ -2338,6 +2372,219 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
             </div>
           )}
+
+          {userSubTab === 'clients' && (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in duration-150">
+              {/* Left column: Clients List */}
+              <div className="lg:col-span-2 bg-white border border-slate-100 rounded-2xl p-6 shadow-xs space-y-4 font-sans">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-50 pb-3">
+                  <div>
+                    <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                      <Users className="w-4 h-4 text-sky-600" /> Database Client & Riwayat Belanja
+                    </h3>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Daftar pembeli unik yang teridentifikasi otomatis dari transaksi invoice marketplace Anda.
+                    </p>
+                  </div>
+                  
+                  {/* Search Bar */}
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      placeholder="Cari nama, email, wa..."
+                      value={clientSearchTerm}
+                      onChange={(e) => setClientSearchTerm(e.target.value)}
+                      className="text-[11px] font-medium bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3.5 py-1.5 w-full sm:w-[220px] focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-sky-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Clients Table */}
+                <div className="overflow-x-auto border border-slate-100 rounded-xl">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-150">
+                        <th className="p-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Client / Pembeli</th>
+                        <th className="p-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Kontak</th>
+                        <th className="p-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-right">Pembelian</th>
+                        <th className="p-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-right">Total Belanja</th>
+                        <th className="p-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-right">Aksi</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {(() => {
+                        const q = clientSearchTerm.trim().toLowerCase();
+                        const filtered = q 
+                          ? clients.filter(c => 
+                              (c.name || '').toLowerCase().includes(q) || 
+                              (c.email || '').toLowerCase().includes(q) || 
+                              (c.phone || '').toLowerCase().includes(q)
+                            )
+                          : clients;
+
+                        if (filtered.length === 0) {
+                          return (
+                            <tr>
+                              <td colSpan={5} className="p-8 text-center text-slate-400 text-xs">
+                                {clients.length === 0 
+                                  ? 'Belum ada data transaksi pembeli yang tercatat di database.' 
+                                  : 'Tidak ditemukan client yang cocok dengan pencarian Anda.'}
+                              </td>
+                            </tr>
+                          );
+                        }
+
+                        return filtered.map((client) => {
+                          const isSelected = selectedClientEmail === client.email;
+                          return (
+                            <tr 
+                              key={client.email} 
+                              className={`hover:bg-slate-50/50 transition-colors ${isSelected ? 'bg-sky-50/40' : ''}`}
+                            >
+                              <td className="p-3">
+                                <span className="text-xs font-bold text-slate-800 block">{client.name}</span>
+                                <span className="text-[9px] text-slate-400 block">Gabung: {new Date(client.joinedDate).toLocaleDateString('id-ID')}</span>
+                              </td>
+                              <td className="p-3">
+                                <span className="text-xs text-slate-600 block font-medium">{client.email}</span>
+                                {client.phone && <span className="text-[9px] text-slate-400 block font-mono">{client.phone}</span>}
+                              </td>
+                              <td className="p-3 text-right text-xs text-slate-700 font-bold">
+                                {client.successTransactions.length}x <span className="text-[9px] text-slate-400 font-normal">sukses</span>
+                              </td>
+                              <td className="p-3 text-right">
+                                <span className="text-xs font-black text-emerald-600 font-mono">
+                                  Rp {client.totalSpent.toLocaleString('id-ID')}
+                                </span>
+                              </td>
+                              <td className="p-3 text-right">
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedClientEmail(client.email)}
+                                  className={`px-2.5 py-1.5 rounded-lg text-[10px] font-extrabold transition-all cursor-pointer inline-flex items-center gap-1 ${
+                                    isSelected 
+                                      ? 'bg-sky-600 text-white shadow-xs' 
+                                      : 'bg-slate-50 border border-slate-200 text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                                  }`}
+                                >
+                                  <Search className="w-3 h-3" /> Detail
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        });
+                      })()}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Right column: Client Details Profile */}
+              <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-xs space-y-5 h-fit font-sans">
+                {(() => {
+                  const client = clients.find(c => c.email === selectedClientEmail);
+                  if (!client) {
+                    return (
+                      <div className="text-center py-16 text-slate-400 space-y-3">
+                        <Users className="w-10 h-10 text-slate-200 mx-auto" />
+                        <div>
+                          <p className="text-xs font-bold text-slate-700">Pilih Client</p>
+                          <p className="text-[10px] text-slate-400 max-w-[180px] mx-auto mt-1">Silakan klik tombol <strong>Detail</strong> pada salah satu baris client untuk melihat rangkuman transaksi mereka.</p>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="space-y-5 animate-in fade-in duration-200">
+                      {/* Header Profile */}
+                      <div className="border-b border-slate-100 pb-4">
+                        <div className="flex items-center gap-2.5 mb-2">
+                          <div className="w-9 h-9 rounded-full bg-slate-900 text-white flex items-center justify-center text-xs font-black">
+                            {client.name.substring(0, 2).toUpperCase()}
+                          </div>
+                          <div>
+                            <span className="text-xs font-black text-slate-900 block">{client.name}</span>
+                            <span className="text-[10px] text-slate-400 block font-mono">{client.email}</span>
+                          </div>
+                        </div>
+                        {client.phone && (
+                          <span className="text-[10px] text-slate-500 flex items-center gap-1 font-mono">
+                            <Phone className="w-3 h-3 text-emerald-500" /> {client.phone}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Stat Metrics Box */}
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                          <span className="block text-[9px] text-slate-400 font-bold uppercase tracking-wider">Total Belanja</span>
+                          <span className="block text-xs font-black text-emerald-600 font-mono mt-0.5">Rp {client.totalSpent.toLocaleString('id-ID')}</span>
+                        </div>
+                        <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                          <span className="block text-[9px] text-slate-400 font-bold uppercase tracking-wider">Jumlah Sukses</span>
+                          <span className="block text-xs font-black text-slate-800 font-mono mt-0.5">{client.successTransactions.length} Transaksi</span>
+                        </div>
+                      </div>
+
+                      {/* Products Purchased list */}
+                      <div className="space-y-2">
+                        <span className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">Aset Yang Dimiliki ({client.purchasedProducts.length})</span>
+                        {client.purchasedProducts.length === 0 ? (
+                          <p className="text-[10px] text-slate-400 italic">Belum ada produk digital yang sukses terkirim.</p>
+                        ) : (
+                          <div className="flex flex-wrap gap-1.5">
+                            {client.purchasedProducts.map((p, idx) => (
+                              <span key={idx} className="inline-block px-2.5 py-1 bg-sky-50 text-sky-700 text-[10px] font-bold rounded-lg border border-sky-100">
+                                {p}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Transaction list */}
+                      <div className="space-y-2.5">
+                        <span className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">Semua Riwayat Invoice ({client.transactions.length})</span>
+                        <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
+                          {client.transactions.map((t) => {
+                            const isSuccess = t.paymentStatus === 'SUCCESS';
+                            const isPending = t.paymentStatus === 'PENDING';
+                            
+                            return (
+                              <div key={t.id} className="p-2.5 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between text-[10px]">
+                                <div className="space-y-0.5">
+                                  <div className="font-bold text-slate-800 flex items-center gap-1 font-mono text-[9px]">
+                                    #{t.id.substring(0, 8).toUpperCase()}
+                                  </div>
+                                  <div className="text-slate-400 font-medium">
+                                    {new Date(t.createdAt).toLocaleDateString('id-ID')}
+                                  </div>
+                                </div>
+                                <div className="text-right space-y-1">
+                                  <div className="font-bold text-slate-700 font-mono">
+                                    Rp {t.totalPrice.toLocaleString('id-ID')}
+                                  </div>
+                                  <span className={`inline-block px-1.5 py-0.5 text-[8.5px] font-extrabold rounded-md uppercase tracking-wider ${
+                                    isSuccess ? 'bg-emerald-50 text-emerald-700' :
+                                    isPending ? 'bg-amber-50 text-amber-700' :
+                                    'bg-rose-50 text-rose-700'
+                                  }`}>
+                                    {t.paymentStatus}
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -2351,7 +2598,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
                   <Settings className="w-4 h-4 text-sky-600" /> Pengaturan Identitas & Branding Toko
                 </h3>
-                <p className="text-[10.5px] text-slate-400 mt-1">Ubah nama, slogan, dan visual logo Anda. Perubahan akan langsung diaplikasikan ke seluruh halaman aplikasi marketplace dan dokumen Invoice digital.</p>
+                <p className="text-[10.5px] text-slate-400 mt-1">Ubah nama, slogan, dan visual logo Anda. Perubahan akan diaplikasikan ke seluruh halaman aplikasi setelah Anda mengklik simpan.</p>
               </div>
 
               {/* Shop Name & Slogan */}
@@ -2360,8 +2607,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Nama Toko Digital</label>
                   <input
                     type="text"
-                    value={branding.name}
-                    onChange={(e) => onUpdateBranding({ ...branding, name: e.target.value })}
+                    value={draftBranding.name || ''}
+                    onChange={(e) => setDraftBranding({ ...draftBranding, name: e.target.value })}
                     className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-sky-500 font-bold text-slate-900"
                     placeholder="Contoh: DigiMarket"
                   />
@@ -2370,8 +2617,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Slogan / Deskripsi Singkat</label>
                   <input
                     type="text"
-                    value={branding.slogan}
-                    onChange={(e) => onUpdateBranding({ ...branding, slogan: e.target.value })}
+                    value={draftBranding.slogan || ''}
+                    onChange={(e) => setDraftBranding({ ...draftBranding, slogan: e.target.value })}
                     className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-sky-500 font-medium text-slate-700"
                     placeholder="Contoh: Premium Creative Hub"
                   />
@@ -2382,8 +2629,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <div>
                 <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Alamat Toko / Lokasi Kantor</label>
                 <textarea
-                  value={branding.address || ''}
-                  onChange={(e) => onUpdateBranding({ ...branding, address: e.target.value })}
+                  value={draftBranding.address || ''}
+                  onChange={(e) => setDraftBranding({ ...draftBranding, address: e.target.value })}
                   rows={2}
                   className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl p-3.5 focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-sky-500 font-medium text-slate-700 leading-relaxed"
                   placeholder="Contoh: Jl. Sudirman No. 123, Lantai 5, Jakarta Selatan, DKI Jakarta 12190"
@@ -2398,8 +2645,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </label>
                 <input
                   type="text"
-                  value={branding.whatsappNumber || ''}
-                  onChange={(e) => onUpdateBranding({ ...branding, whatsappNumber: e.target.value })}
+                  value={draftBranding.whatsappNumber || ''}
+                  onChange={(e) => setDraftBranding({ ...draftBranding, whatsappNumber: e.target.value })}
                   className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-sky-500 font-mono text-slate-800"
                   placeholder="Contoh: 6282288882512"
                 />
@@ -2422,9 +2669,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <button
                       key={col.id}
                       type="button"
-                      onClick={() => onUpdateBranding({ ...branding, logoColor: col.id })}
+                      onClick={() => setDraftBranding({ ...draftBranding, logoColor: col.id })}
                       className={`flex items-center gap-2 px-3 py-1.5 border rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                        branding.logoColor === col.id
+                        draftBranding.logoColor === col.id
                           ? 'border-slate-900 bg-slate-50 ring-2 ring-slate-900/10'
                           : 'border-slate-150 hover:bg-slate-50'
                       }`}
@@ -2455,12 +2702,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     { id: 'Cpu', icon: Cpu, name: 'Mikro' },
                   ].map((ico) => {
                     const IconComp = ico.icon;
-                    const isSelected = branding.logoIcon === ico.id && !branding.logoUrl;
+                    const isSelected = draftBranding.logoIcon === ico.id && !draftBranding.logoUrl;
                     return (
                       <button
                         key={ico.id}
                         type="button"
-                        onClick={() => onUpdateBranding({ ...branding, logoIcon: ico.id, logoUrl: '' })}
+                        onClick={() => setDraftBranding({ ...draftBranding, logoIcon: ico.id, logoUrl: '' })}
                         className={`p-3 border rounded-xl flex flex-col items-center justify-center gap-1.5 transition-all cursor-pointer ${
                           isSelected
                             ? 'border-slate-900 bg-slate-900 text-white shadow-md'
@@ -2481,15 +2728,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <div className="flex gap-2">
                   <input
                     type="url"
-                    value={branding.logoUrl || ''}
-                    onChange={(e) => onUpdateBranding({ ...branding, logoUrl: e.target.value })}
+                    value={draftBranding.logoUrl || ''}
+                    onChange={(e) => setDraftBranding({ ...draftBranding, logoUrl: e.target.value })}
                     className="flex-1 text-xs bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-sky-500 font-mono"
                     placeholder="https://domain.com/path-ke-gambar-logo.png"
                   />
-                  {branding.logoUrl && (
+                  {draftBranding.logoUrl && (
                     <button
                       type="button"
-                      onClick={() => onUpdateBranding({ ...branding, logoUrl: '' })}
+                      onClick={() => setDraftBranding({ ...draftBranding, logoUrl: '' })}
                       className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold rounded-xl border border-rose-200 cursor-pointer transition-colors"
                     >
                       Reset
@@ -2497,6 +2744,39 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   )}
                 </div>
                 <p className="text-[10px] text-slate-400 mt-1">Masukkan URL link foto langsung (png, jpeg, webp) jika ingin menggantikan icon bawaan dengan logo instansi Anda.</p>
+              </div>
+
+              {/* Save Button for Identity & Branding */}
+              <div className="flex items-center justify-between border-t border-slate-100 pt-4 mt-2">
+                <span className="text-[10px] text-slate-400 font-medium italic">
+                  *Perubahan identitas toko perlu disimpan agar aktif
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleSaveSettings('identity')}
+                  disabled={saveStatus.identity === 'saving'}
+                  className={`px-4.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-sm ${
+                    saveStatus.identity === 'success'
+                      ? 'bg-emerald-600 text-white hover:bg-emerald-700 font-extrabold'
+                      : saveStatus.identity === 'saving'
+                      ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
+                      : 'bg-slate-900 hover:bg-sky-600 text-white hover:scale-[1.02] active:scale-[0.98]'
+                  }`}
+                >
+                  {saveStatus.identity === 'success' ? (
+                    <>
+                      <Check className="w-4 h-4" /> Berhasil Disimpan
+                    </>
+                  ) : saveStatus.identity === 'saving' ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Menyimpan...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-3.5 h-3.5" /> Simpan Identitas Toko
+                    </>
+                  )}
+                </button>
               </div>
 
             </div>
@@ -2524,10 +2804,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <button
                       key={skin.id}
                       type="button"
-                      onClick={() => onUpdateBranding({ ...branding, themeSkin: skin.id as any })}
+                      onClick={() => setDraftBranding({ ...draftBranding, themeSkin: skin.id as any })}
                       className={`p-3 border rounded-xl flex flex-col items-center gap-1.5 transition-all cursor-pointer ${
-                        (branding.themeSkin || 'default') === skin.id
-                          ? 'border-slate-900 bg-slate-50 ring-2 ring-slate-900/10'
+                        (draftBranding.themeSkin || 'default') === skin.id
+                          ? 'border-slate-900 bg-slate-50 ring-2 ring-slate-900/10 font-bold'
                           : 'border-slate-150 hover:bg-slate-50'
                       }`}
                     >
@@ -2545,8 +2825,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Judul Utama Hero (Front Page)</label>
                     <input
                       type="text"
-                      value={branding.heroTitle || ''}
-                      onChange={(e) => onUpdateBranding({ ...branding, heroTitle: e.target.value })}
+                      value={draftBranding.heroTitle || ''}
+                      onChange={(e) => setDraftBranding({ ...draftBranding, heroTitle: e.target.value })}
                       className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-sky-500 font-bold text-slate-800"
                       placeholder="Pusat Lisensi & Aset Digital Resmi"
                     />
@@ -2555,20 +2835,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Sub-judul / Penjelasan Hero</label>
                     <input
                       type="text"
-                      value={branding.heroSubtitle || ''}
-                      onChange={(e) => onUpdateBranding({ ...branding, heroSubtitle: e.target.value })}
+                      value={draftBranding.heroSubtitle || ''}
+                      onChange={(e) => setDraftBranding({ ...draftBranding, heroSubtitle: e.target.value })}
                       className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-sky-500 font-medium text-slate-700"
                       placeholder="Katalog Software premium, template desain, & lisensi developer."
                     />
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
                     <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Layout Katalog Produk</label>
                     <select
-                      value={branding.layoutStyle || 'grid'}
-                      onChange={(e) => onUpdateBranding({ ...branding, layoutStyle: e.target.value as any })}
+                      value={draftBranding.layoutStyle || 'grid'}
+                      onChange={(e) => setDraftBranding({ ...draftBranding, layoutStyle: e.target.value as any })}
                       className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-sky-500 font-bold text-slate-900"
                     >
                       <option value="grid">Grid Standar (3 Kolom)</option>
@@ -2577,17 +2857,98 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     </select>
                   </div>
                   <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Jumlah Produk Halaman Utama</label>
+                    <select
+                      value={draftBranding.productsLimit || 6}
+                      onChange={(e) => setDraftBranding({ ...draftBranding, productsLimit: parseInt(e.target.value, 10) })}
+                      className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-sky-500 font-bold text-slate-900"
+                    >
+                      <option value="3">3 Produk</option>
+                      <option value="6">6 Produk</option>
+                      <option value="9">9 Produk</option>
+                      <option value="12">12 Produk</option>
+                      <option value="18">18 Produk</option>
+                      <option value="30">30 Produk</option>
+                      <option value="100">100 Produk</option>
+                    </select>
+                  </div>
+                  <div>
                     <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">URL Gambar Background Hero (Opsional)</label>
                     <input
                       type="url"
-                      value={branding.heroBannerUrl || ''}
-                      onChange={(e) => onUpdateBranding({ ...branding, heroBannerUrl: e.target.value })}
+                      value={draftBranding.heroBannerUrl || ''}
+                      onChange={(e) => setDraftBranding({ ...draftBranding, heroBannerUrl: e.target.value })}
                       className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-sky-500 font-mono text-slate-800"
                       placeholder="https://images.unsplash.com/..."
                     />
                   </div>
                 </div>
+
+                {/* Font Style Selection */}
+                <div className="pt-4 border-t border-slate-100">
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2.5 flex items-center gap-1.5 font-sans">
+                    <Type className="w-3.5 h-3.5 text-sky-500 animate-bounce" /> Pilih Gaya Font Toko (Typography)
+                  </label>
+                  <div className="grid grid-cols-3 gap-2.5 font-sans">
+                    {[
+                      { id: 'inter', name: 'Inter (Sans)', desc: 'Profesional & Bersih', cls: 'font-sans text-xs' },
+                      { id: 'ubuntu', name: 'Ubuntu', desc: 'Modern & Ergonomis', cls: 'font-ubuntu text-sm font-bold' },
+                      { id: 'noteworthy', name: 'Noteworthy', desc: 'Kreatif & Kasual', cls: 'font-noteworthy text-xs font-bold' },
+                    ].map((f) => {
+                      const isSelected = (draftBranding.fontFamily || 'inter') === f.id;
+                      return (
+                        <button
+                          key={f.id}
+                          type="button"
+                          onClick={() => setDraftBranding({ ...draftBranding, fontFamily: f.id as any })}
+                          className={`p-3.5 border rounded-xl flex flex-col items-start gap-1 transition-all cursor-pointer text-left ${
+                            isSelected
+                              ? 'border-slate-900 bg-slate-50 ring-2 ring-slate-900/10'
+                              : 'border-slate-150 hover:bg-slate-50'
+                          }`}
+                        >
+                          <span className={`block font-black text-slate-900 ${f.cls}`}>{f.name}</span>
+                          <span className="text-[9px] text-slate-400 leading-tight font-medium font-sans">{f.desc}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
+
+              {/* Save Button for Theme & Hero Banner */}
+              <div className="flex items-center justify-between border-t border-slate-100 pt-4 mt-2">
+                <span className="text-[10px] text-slate-400 font-medium italic">
+                  *Pilih skin visual lalu simpan pengaturan halaman depan
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleSaveSettings('skin')}
+                  disabled={saveStatus.skin === 'saving'}
+                  className={`px-4.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-sm ${
+                    saveStatus.skin === 'success'
+                      ? 'bg-emerald-600 text-white hover:bg-emerald-700 font-extrabold'
+                      : saveStatus.skin === 'saving'
+                      ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
+                      : 'bg-slate-900 hover:bg-sky-600 text-white hover:scale-[1.02] active:scale-[0.98]'
+                  }`}
+                >
+                  {saveStatus.skin === 'success' ? (
+                    <>
+                      <Check className="w-4 h-4" /> Berhasil Disimpan
+                    </>
+                  ) : saveStatus.skin === 'saving' ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Menyimpan...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-3.5 h-3.5" /> Simpan Tema & Banner
+                    </>
+                  )}
+                </button>
+              </div>
+
             </div>
 
             {/* Card: Default Catatan Belanja & Transaksi */}
@@ -2604,12 +2965,45 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <div>
                 <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Edit Default Catatan Toko</label>
                 <textarea
-                  value={branding.defaultNotes || ''}
-                  onChange={(e) => onUpdateBranding({ ...branding, defaultNotes: e.target.value })}
+                  value={draftBranding.defaultNotes || ''}
+                  onChange={(e) => setDraftBranding({ ...draftBranding, defaultNotes: e.target.value })}
                   rows={4}
                   className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl p-3.5 focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-sky-500 font-medium text-slate-700 leading-relaxed"
                   placeholder="Terima kasih telah berbelanja di toko kami! Silakan lakukan pembayaran sesuai instruksi di atas dan kirimkan bukti transfer Anda agar dapat kami proses secepatnya."
                 />
+              </div>
+
+              {/* Save Button for Default Notes */}
+              <div className="flex items-center justify-between border-t border-slate-100 pt-4 mt-2">
+                <span className="text-[10px] text-slate-400 font-medium italic">
+                  *Catatan default akan terlampir otomatis di struk invoice
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleSaveSettings('notes')}
+                  disabled={saveStatus.notes === 'saving'}
+                  className={`px-4.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-sm ${
+                    saveStatus.notes === 'success'
+                      ? 'bg-emerald-600 text-white hover:bg-emerald-700 font-extrabold'
+                      : saveStatus.notes === 'saving'
+                      ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
+                      : 'bg-slate-900 hover:bg-sky-600 text-white hover:scale-[1.02] active:scale-[0.98]'
+                  }`}
+                >
+                  {saveStatus.notes === 'success' ? (
+                    <>
+                      <Check className="w-4 h-4" /> Berhasil Disimpan
+                    </>
+                  ) : saveStatus.notes === 'saving' ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Menyimpan...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-3.5 h-3.5" /> Simpan Catatan Toko
+                    </>
+                  )}
+                </button>
               </div>
             </div>
 
@@ -2617,85 +3011,154 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-xs space-y-5">
               <div className="border-b border-slate-100 pb-3">
                 <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
-                  <Mail className="w-4 h-4 text-sky-600" /> Pengaturan SMTP Server (Kirim Email Otomatis)
+                  <Mail className="w-4 h-4 text-sky-600" /> Pengaturan Layanan Email (SMTP / Brevo REST API)
                 </h3>
                 <p className="text-[10.5px] text-slate-400 mt-1">
-                  Konfigurasikan server SMTP Anda untuk mengirimkan lisensi digital, file download, dan invoice secara instan ke email pembeli setelah pembayaran divalidasi. Jika dikosongkan, sistem akan otomatis menggunakan fallback default Google AI Studio server.
+                  Pilih layanan email yang ingin Anda gunakan untuk mengirimkan lisensi digital, file download, dan invoice secara instan ke email pembeli setelah pembayaran divalidasi.
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="md:col-span-2">
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">SMTP Host / Server</label>
-                  <input
-                    type="text"
-                    value={branding.smtpHost || ''}
-                    onChange={(e) => onUpdateBranding({ ...branding, smtpHost: e.target.value })}
-                    className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-sky-500 font-mono text-slate-800"
-                    placeholder="Contoh: smtp.gmail.com atau mail.domain.com"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">SMTP Port</label>
-                  <input
-                    type="text"
-                    value={branding.smtpPort || ''}
-                    onChange={(e) => onUpdateBranding({ ...branding, smtpPort: e.target.value })}
-                    className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-sky-500 font-mono text-slate-800"
-                    placeholder="Contoh: 465, 587, 25"
-                  />
-                </div>
-              </div>
-
+              {/* Service Selection */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Username SMTP (Email Pengirim)</label>
-                  <input
-                    type="text"
-                    value={branding.smtpUser || ''}
-                    onChange={(e) => onUpdateBranding({ ...branding, smtpUser: e.target.value })}
-                    className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-sky-500 font-mono text-slate-800"
-                    placeholder="Contoh: tokoanda@gmail.com"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Password SMTP / App Password</label>
-                  <input
-                    type="password"
-                    value={branding.smtpPassword || ''}
-                    onChange={(e) => onUpdateBranding({ ...branding, smtpPassword: e.target.value })}
-                    className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-sky-500 font-mono text-slate-800"
-                    placeholder="Sandi Aplikasi 16-digit atau sandi host"
-                  />
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Metode Pengiriman Email</label>
+                  <select
+                    value={draftBranding.emailService || 'smtp'}
+                    onChange={(e) => setDraftBranding({ ...draftBranding, emailService: e.target.value as 'smtp' | 'brevo' })}
+                    className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-sky-500 font-medium text-slate-800"
+                  >
+                    <option value="smtp">Standard SMTP Server (Gmail / Host Send)</option>
+                    <option value="brevo">Brevo REST API (Lebih Stabil & Cepat)</option>
+                  </select>
                 </div>
               </div>
 
-              <div className="flex items-center justify-between p-3.5 bg-slate-50 rounded-xl border border-slate-100">
-                <div className="space-y-0.5">
-                  <span className="block text-xs font-bold text-slate-700">Gunakan Koneksi Aman (Secure SSL/TLS)</span>
-                  <span className="block text-[10px] text-slate-400">Direkomendasikan aktif jika Anda menggunakan port 465.</span>
+              {draftBranding.emailService === 'brevo' ? (
+                /* Brevo API Settings */
+                <div className="space-y-4 pt-1 animate-in fade-in duration-200">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Nama Pengirim (Sender Name)</label>
+                      <input
+                        type="text"
+                        value={draftBranding.brevoSenderName || ''}
+                        onChange={(e) => setDraftBranding({ ...draftBranding, brevoSenderName: e.target.value })}
+                        className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-sky-500 text-slate-800 font-medium"
+                        placeholder="Contoh: DigiMarket Official"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Email Pengirim Terdaftar (Sender Email)</label>
+                      <input
+                        type="email"
+                        value={draftBranding.brevoSenderEmail || ''}
+                        onChange={(e) => setDraftBranding({ ...draftBranding, brevoSenderEmail: e.target.value })}
+                        className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-sky-500 text-slate-800 font-mono"
+                        placeholder="Contoh: tokoanda@domain.com"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Brevo API Key (V3)</label>
+                    <input
+                      type="password"
+                      value={draftBranding.brevoApiKey || ''}
+                      onChange={(e) => setDraftBranding({ ...draftBranding, brevoApiKey: e.target.value })}
+                      className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-sky-500 text-slate-800 font-mono"
+                      placeholder="xkeysib-..."
+                    />
+                    <p className="text-[9.5px] text-slate-400 mt-1">
+                      {"Dapatkan API Key versi 3 Anda di dashboard Brevo (Smtp & API -> API Keys)."}
+                    </p>
+                  </div>
                 </div>
-                <label className="relative inline-flex items-center cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={branding.smtpSecure !== false}
-                    onChange={(e) => onUpdateBranding({ ...branding, smtpSecure: e.target.checked })}
-                    className="sr-only peer"
-                  />
-                  <div className="w-11 h-6 bg-slate-200 peer-focus:outline-hidden rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-sky-500"></div>
-                </label>
-              </div>
+              ) : (
+                /* SMTP Server Settings */
+                <div className="space-y-4 pt-1 animate-in fade-in duration-200">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="md:col-span-2">
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">SMTP Host / Server</label>
+                      <input
+                        type="text"
+                        value={draftBranding.smtpHost || ''}
+                        onChange={(e) => setDraftBranding({ ...draftBranding, smtpHost: e.target.value })}
+                        className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-sky-500 font-mono text-slate-800"
+                        placeholder="Contoh: smtp.gmail.com atau mail.domain.com"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">SMTP Port</label>
+                      <input
+                        type="text"
+                        value={draftBranding.smtpPort || ''}
+                        onChange={(e) => setDraftBranding({ ...draftBranding, smtpPort: e.target.value })}
+                        className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-sky-500 font-mono text-slate-800"
+                        placeholder="Contoh: 465, 587, 25"
+                      />
+                    </div>
+                  </div>
 
-              {/* SMTP Connection Testing Button */}
-              <div className="flex items-center justify-end gap-3 pt-2">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Username SMTP (Email Pengirim)</label>
+                      <input
+                        type="text"
+                        value={draftBranding.smtpUser || ''}
+                        onChange={(e) => setDraftBranding({ ...draftBranding, smtpUser: e.target.value })}
+                        className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-sky-500 font-mono text-slate-800"
+                        placeholder="Contoh: tokoanda@gmail.com"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Password SMTP / App Password</label>
+                      <input
+                        type="password"
+                        value={draftBranding.smtpPassword || ''}
+                        onChange={(e) => setDraftBranding({ ...draftBranding, smtpPassword: e.target.value })}
+                        className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-sky-500 font-mono text-slate-800"
+                        placeholder="Sandi Aplikasi 16-digit atau sandi host"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between p-3.5 bg-slate-50 rounded-xl border border-slate-100">
+                    <div className="space-y-0.5">
+                      <span className="block text-xs font-bold text-slate-700">Gunakan Koneksi Aman (Secure SSL/TLS)</span>
+                      <span className="block text-[10px] text-slate-400">Direkomendasikan aktif jika Anda menggunakan port 465.</span>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={draftBranding.smtpSecure !== false}
+                        onChange={(e) => setDraftBranding({ ...draftBranding, smtpSecure: e.target.checked })}
+                        className="sr-only peer"
+                      />
+                      <div className="w-11 h-6 bg-slate-200 peer-focus:outline-hidden rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-sky-500"></div>
+                    </label>
+                  </div>
+                </div>
+              )}
+
+              {/* SMTP / Brevo Connection Testing Button & Save settings */}
+              <div className="flex items-center justify-between border-t border-slate-100 pt-4 mt-2">
                 <button
                   type="button"
                   onClick={async () => {
-                    if (!branding.smtpHost || !branding.smtpUser || !branding.smtpPassword) {
-                      alert('Harap isi Host, Username, dan Password SMTP sebelum melakukan uji coba!');
-                      return;
+                    const isBrevo = draftBranding.emailService === 'brevo';
+                    if (isBrevo) {
+                      if (!draftBranding.brevoApiKey || !draftBranding.brevoSenderEmail) {
+                        alert('Harap isi API Key dan Email Pengirim Brevo sebelum melakukan uji coba!');
+                        return;
+                      }
+                    } else {
+                      if (!draftBranding.smtpHost || !draftBranding.smtpUser || !draftBranding.smtpPassword) {
+                        alert('Harap isi Host, Username, dan Password SMTP sebelum melakukan uji coba!');
+                        return;
+                      }
                     }
-                    const testEmail = prompt('Masukkan alamat email untuk mengirim pesan uji coba SMTP:', branding.smtpUser);
+
+                    const defaultPrompt = isBrevo ? draftBranding.brevoSenderEmail : draftBranding.smtpUser;
+                    const testEmail = prompt(`Masukkan alamat email untuk mengirim pesan uji coba ${isBrevo ? 'Brevo REST API' : 'SMTP'}:`, defaultPrompt);
                     if (!testEmail) return;
 
                     try {
@@ -2704,33 +3167,37 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                           to: testEmail.trim(),
-                          buyerName: 'Uji Coba SMTP',
-                          transactionId: 'TEST-SMTP-' + Date.now().toString().substring(8),
+                          buyerName: 'Uji Coba Layanan Email',
+                          transactionId: 'TEST-EMAIL-' + Date.now().toString().substring(8),
                           paymentMethod: 'Sistem Test',
                           totalPrice: 15000,
                           items: [{
                             productId: 'test-id',
-                            productName: 'Produk Uji Coba SMTP Koneksi',
+                            productName: `Produk Uji Coba ${isBrevo ? 'Brevo API' : 'SMTP'}`,
                             price: 15000,
-                            licenseKey: 'PROSES-SMTP-SUKSES-KONEKSI-OK',
+                            licenseKey: 'PROSES-SUKSES-KONEKSI-OK',
                             fileUrl: '#',
                             fileSize: '1 KB'
                           }],
                           paymentStatus: 'SUCCESS',
+                          emailService: draftBranding.emailService || 'smtp',
+                          brevoApiKey: draftBranding.brevoApiKey,
+                          brevoSenderName: draftBranding.brevoSenderName,
+                          brevoSenderEmail: draftBranding.brevoSenderEmail,
                           smtpConfig: {
-                            host: branding.smtpHost,
-                            port: branding.smtpPort,
-                            user: branding.smtpUser,
-                            password: branding.smtpPassword,
-                            secure: branding.smtpSecure !== false
+                            host: draftBranding.smtpHost,
+                            port: draftBranding.smtpPort,
+                            user: draftBranding.smtpUser,
+                            password: draftBranding.smtpPassword,
+                            secure: draftBranding.smtpSecure !== false
                           }
                         })
                       });
                       const resData = await response.json();
                       if (response.ok && resData.success) {
-                        alert(`🎉 Sukses! Koneksi SMTP berhasil tersambung & Email test terkirim ke ${testEmail}.`);
+                        alert(`🎉 Sukses! Layanan ${isBrevo ? 'Brevo API' : 'SMTP'} berhasil tersambung & Email test terkirim ke ${testEmail}.`);
                       } else {
-                        alert(`❌ Gagal tersambung ke SMTP Server:\n${resData.error || 'Terjadi kesalahan sistem.'}`);
+                        alert(`❌ Gagal tersambung ke Layanan:\n${resData.error || 'Terjadi kesalahan sistem.'}`);
                       }
                     } catch (testErr: any) {
                       alert(`❌ Gagal menghubungi server atau timeout:\n${testErr.message || testErr}`);
@@ -2738,7 +3205,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   }}
                   className="px-4 py-2 border border-sky-200 bg-sky-50 hover:bg-sky-100 text-sky-700 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
                 >
-                  <RefreshCw className="w-3.5 h-3.5" /> Tes SMTP Koneksi
+                  <RefreshCw className="w-3.5 h-3.5" /> Tes Koneksi Email
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleSaveSettings('smtp')}
+                  disabled={saveStatus.smtp === 'saving'}
+                  className={`px-4.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-sm ${
+                    saveStatus.smtp === 'success'
+                      ? 'bg-emerald-600 text-white hover:bg-emerald-700 font-extrabold'
+                      : saveStatus.smtp === 'saving'
+                      ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
+                      : 'bg-slate-900 hover:bg-sky-600 text-white hover:scale-[1.02] active:scale-[0.98]'
+                  }`}
+                >
+                  {saveStatus.smtp === 'success' ? (
+                    <>
+                      <Check className="w-4 h-4" /> Berhasil Disimpan
+                    </>
+                  ) : saveStatus.smtp === 'saving' ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Menyimpan...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-3.5 h-3.5" /> Simpan Konfigurasi SMTP
+                    </>
+                  )}
                 </button>
               </div>
             </div>
@@ -2834,11 +3328,115 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
             </div>
 
+            {/* Card: Sinkronisasi Otomatis (Autosync Engine) */}
+            <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-xs space-y-5 animate-in fade-in duration-200">
+              <div className="border-b border-slate-100 pb-3">
+                <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                  <RefreshCw className={`w-4 h-4 text-emerald-500 ${isAutosyncEnabled ? 'animate-spin' : ''}`} /> Konfigurasi Auto-Sync Real-Time
+                </h3>
+                <p className="text-[10.5px] text-slate-400 mt-1 font-sans">
+                  Sistem mendeteksi perubahan data dari database Firebase Cloud secara real-time menggunakan listener aktif (<code className="bg-slate-100 px-1 py-0.5 rounded text-[9.5px]">onSnapshot</code>) tanpa membebani browser atau memerlukan refresh halaman.
+                </p>
+              </div>
+
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 bg-slate-50 rounded-xl border border-slate-100 font-sans">
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-slate-900">Status Auto-Sync Real-Time</span>
+                    <span className={`inline-flex items-center gap-1 text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${
+                      isAutosyncEnabled 
+                        ? 'bg-emerald-100 text-emerald-800 animate-pulse' 
+                        : 'bg-slate-200 text-slate-700'
+                    }`}>
+                      {isAutosyncEnabled ? '● Aktif (Live)' : '○ Nonaktif (Manual)'}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-500 font-medium">
+                    {isAutosyncEnabled 
+                      ? `Terakhir diperbarui dari Cloud: ${lastAutosyncTime || 'Sedang menghubungkan...'}` 
+                      : 'Aktifkan untuk menerima pembaruan produk, transaksi, dan ulasan secara langsung.'}
+                  </p>
+                </div>
+
+                {setIsAutosyncEnabled && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsAutosyncEnabled(!isAutosyncEnabled);
+                    }}
+                    className={`px-4 py-2 text-xs font-black rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-sm select-none shrink-0 ${
+                      isAutosyncEnabled
+                        ? 'bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-100'
+                        : 'bg-emerald-600 hover:bg-emerald-700 text-white hover:scale-[1.02] active:scale-[0.98]'
+                    }`}
+                  >
+                    {isAutosyncEnabled ? 'Matikan Auto-Sync' : 'Aktifkan Auto-Sync'}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Card: Manajemen Pembersihan Data (Database Purge) */}
+            <div className="bg-white border border-rose-150 rounded-2xl p-6 shadow-xs space-y-5 animate-in fade-in duration-200">
+              <div className="border-b border-rose-100 pb-3">
+                <h3 className="text-xs font-bold text-rose-700 uppercase tracking-wider flex items-center gap-2">
+                  <Trash2 className="w-4 h-4 text-rose-600 animate-bounce" /> Area Bahaya: Reset & Pembersihan Data
+                </h3>
+                <p className="text-[10.5px] text-slate-400 mt-1 font-sans">
+                  Bersihkan data transaksi sandbox secara permanen untuk mengosongkan riwayat transaksi dan melatih simulasi pembelian baru dari awal.
+                </p>
+              </div>
+
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 bg-rose-50/50 rounded-xl border border-rose-100/60 font-sans">
+                <div className="space-y-0.5">
+                  <span className="block text-xs font-bold text-rose-950">Purge Semua Riwayat Transaksi</span>
+                  <p className="text-[10px] text-rose-600 font-medium">
+                    Tindakan ini menghapus seluruh {transactions.length} transaksi di LocalStorage dan database Firebase Cloud secara permanen.
+                  </p>
+                </div>
+
+                {onPurgeTransactions && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (purgeConfirmStep === 0) {
+                        setPurgeConfirmStep(1);
+                        setTimeout(() => setPurgeConfirmStep(0), 4000);
+                      } else if (purgeConfirmStep === 1) {
+                        setPurgeConfirmStep(2);
+                        try {
+                          await onPurgeTransactions();
+                          alert('✓ Seluruh data transaksi sandbox berhasil dibersihkan dari database Cloud & lokal.');
+                        } catch (err) {
+                          console.error(err);
+                        } finally {
+                          setPurgeConfirmStep(0);
+                        }
+                      }
+                    }}
+                    disabled={purgeConfirmStep === 2}
+                    className={`px-4.5 py-2.5 text-xs font-black rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-sm select-none shrink-0 ${
+                      purgeConfirmStep === 0
+                        ? 'bg-rose-600 hover:bg-rose-700 text-white hover:scale-[1.02] active:scale-[0.98]'
+                        : purgeConfirmStep === 1
+                        ? 'bg-amber-500 hover:bg-amber-600 text-white animate-pulse'
+                        : 'bg-rose-200 text-rose-800 cursor-not-allowed'
+                    }`}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    {purgeConfirmStep === 0 && 'Purge Transaksi'}
+                    {purgeConfirmStep === 1 && 'Klik Lagi untuk Konfirmasi Purge!'}
+                    {purgeConfirmStep === 2 && 'Membersihkan...'}
+                  </button>
+                )}
+              </div>
+            </div>
+
           </div>
 
           {/* Right Column: Beautiful Dynamic Brand Live Preview Card */}
           <div className="space-y-6">
-            <div className="bg-slate-900 text-white rounded-3xl p-6 shadow-xl space-y-5 border border-slate-800">
+            <div className="bg-slate-900 text-white rounded-3xl p-6 shadow-xl space-y-5 border border-slate-800 animate-in fade-in duration-200">
               <h4 className="text-[11px] font-black text-sky-400 uppercase tracking-wider">Live Preview Tampilan Toko</h4>
               
               {/* Header Preview Box */}
@@ -2846,23 +3444,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <span className="text-[8.5px] font-bold text-slate-500 block uppercase tracking-widest">Tampilan Header Marketplace:</span>
                 <div className="flex items-center gap-2.5 bg-slate-900 p-3 rounded-xl border border-slate-800/60 shadow-inner">
                   {/* Logo Rendering */}
-                  {branding.logoUrl ? (
+                  {draftBranding.logoUrl ? (
                     <div className="w-8 h-8 rounded-lg overflow-hidden flex items-center justify-center bg-white">
-                      <img src={branding.logoUrl} alt="Preview" className="w-full h-full object-cover animate-fade-in" />
+                      <img src={draftBranding.logoUrl} alt="Preview" className="w-full h-full object-cover animate-fade-in" />
                     </div>
                   ) : (
                     <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-white shadow-sm ${
-                      branding.logoColor === 'slate' ? 'bg-slate-800' :
-                      branding.logoColor === 'sky' ? 'bg-sky-500' :
-                      branding.logoColor === 'emerald' ? 'bg-emerald-500' :
-                      branding.logoColor === 'indigo' ? 'bg-indigo-500' :
-                      branding.logoColor === 'rose' ? 'bg-rose-500' :
-                      branding.logoColor === 'amber' ? 'bg-amber-500' :
+                      draftBranding.logoColor === 'slate' ? 'bg-slate-800' :
+                      draftBranding.logoColor === 'sky' ? 'bg-sky-500' :
+                      draftBranding.logoColor === 'emerald' ? 'bg-emerald-500' :
+                      draftBranding.logoColor === 'indigo' ? 'bg-indigo-500' :
+                      draftBranding.logoColor === 'rose' ? 'bg-rose-500' :
+                      draftBranding.logoColor === 'amber' ? 'bg-amber-500' :
                       'bg-violet-500'
                     }`}>
                       {/* Logo Icon rendering based on string */}
                       {(() => {
-                        const iconId = branding.logoIcon;
+                        const iconId = draftBranding.logoIcon;
                         if (iconId === 'ShoppingBag') return <ShoppingBag className="w-4.5 h-4.5" />;
                         if (iconId === 'Database') return <Database className="w-4.5 h-4.5" />;
                         if (iconId === 'Sparkles') return <Sparkles className="w-4.5 h-4.5" />;
@@ -2881,10 +3479,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                   <div>
                     <span className="block text-xs font-black text-white uppercase tracking-wider leading-none">
-                      {branding.name || 'Nama Toko'}
+                      {draftBranding.name || 'Nama Toko'}
                     </span>
                     <span className="text-[9px] text-sky-400 font-bold uppercase tracking-wider mt-1 block">
-                      {branding.slogan || 'Slogan Anda'}
+                      {draftBranding.slogan || 'Slogan Anda'}
                     </span>
                   </div>
                 </div>
@@ -2895,19 +3493,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <span className="text-[8.5px] font-bold text-slate-500 block uppercase tracking-widest">Kop Invoice Digital:</span>
                 <div className="bg-white p-4 rounded-xl text-slate-800 space-y-1 shadow-xs border border-slate-200">
                   <div className="flex items-center gap-1.5 border-b border-slate-100 pb-2">
-                    {branding.logoUrl ? (
+                    {draftBranding.logoUrl ? (
                       <div className="w-6 h-6 rounded overflow-hidden flex items-center justify-center bg-white border">
-                        <img src={branding.logoUrl} alt="Preview" className="w-full h-full object-cover" />
+                        <img src={draftBranding.logoUrl} alt="Preview" className="w-full h-full object-cover" />
                       </div>
                     ) : (
                       <div className="w-6 h-6 bg-slate-900 text-white rounded flex items-center justify-center text-[10px] font-bold">
-                        {branding.name ? branding.name.substring(0, 2).toUpperCase() : 'DM'}
+                        {draftBranding.name ? draftBranding.name.substring(0, 2).toUpperCase() : 'DM'}
                       </div>
                     )}
-                    <span className="font-extrabold text-xs uppercase tracking-tight text-slate-900">{branding.name || 'DigiMarket'}</span>
+                    <span className="font-extrabold text-xs uppercase tracking-tight text-slate-900">{draftBranding.name || 'DigiMarket'}</span>
                   </div>
-                  <p className="text-[8px] text-slate-400 leading-tight">{branding.slogan || 'Pusat Distribusi Aset Digital & Lisensi Resmi'}</p>
-                  <p className="text-[8px] text-slate-400 leading-tight font-medium">{branding.address || 'Gedung Cyber, Jakarta, Indonesia'}</p>
+                  <p className="text-[8px] text-slate-400 leading-tight">{draftBranding.slogan || 'Pusat Distribusi Aset Digital & Lisensi Resmi'}</p>
+                  <p className="text-[8px] text-slate-400 leading-tight font-medium">{draftBranding.address || 'Gedung Cyber, Jakarta, Indonesia'}</p>
                 </div>
               </div>
 

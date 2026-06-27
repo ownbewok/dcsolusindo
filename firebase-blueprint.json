@@ -109,6 +109,20 @@
         "usageCount": { "type": "number" }
       },
       "required": ["id", "code", "type", "value", "isActive"]
+    },
+    "SilaturahmiMessage": {
+      "title": "SilaturahmiMessage",
+      "description": "Guestbook and friendly greeting message from visitors",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "message": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "avatarColor": { "type": "string" },
+        "role": { "type": "string" }
+      },
+      "required": ["id", "name", "message", "timestamp"]
     }
   },
   "firestore": {
@@ -143,6 +157,10 @@
     "/uploads/{uploadId}": {
       "schema": "object",
       "description": "Temporary uploaded payment proof documents"
+    },
+    "/silaturahmi/{messageId}": {
+      "schema": "SilaturahmiMessage",
+      "description": "Public guestbook or chat list of friendly messages from users"
     }
   }
 }

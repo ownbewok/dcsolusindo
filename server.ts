@@ -14,51 +14,78 @@ const PORT = 3000;
 // Enable JSON parser for POST requests
 app.use(express.json());
 
-// API: Send email using Gmail SMTP / custom settings
+// API: Send email using Gmail SMTP / Brevo REST API / custom settings
 app.post("/api/send-email", async (req, res) => {
-  const { to, buyerName, transactionId, paymentMethod, totalPrice, items, paymentStatus, smtpConfig } = req.body;
+  const { 
+    to, 
+    buyerName, 
+    transactionId, 
+    paymentMethod, 
+    totalPrice, 
+    items, 
+    paymentStatus, 
+    smtpConfig, 
+    emailService, 
+    brevoApiKey, 
+    brevoSenderName, 
+    brevoSenderEmail 
+  } = req.body;
 
   if (!to) {
     return res.status(400).json({ success: false, error: "Alamat email penerima ('to') wajib diisi!" });
   }
 
-  let transporter;
+  const activeEmailService = emailService || (process.env.BREVO_API_KEY ? "brevo" : "smtp");
+  const activeBrevoApiKey = brevoApiKey || process.env.BREVO_API_KEY;
+  const activeBrevoSenderEmail = brevoSenderEmail || process.env.BREVO_SENDER_EMAIL || "no-reply@digimarket.com";
+  const activeBrevoSenderName = brevoSenderName || process.env.BREVO_SENDER_NAME || "DigiMarket System";
+
+  let transporter: any;
   let fromEmail = "no-reply@digimarket.com";
   let usingCustomSMTP = false;
 
-  if (smtpConfig && smtpConfig.host && smtpConfig.user && smtpConfig.password) {
-    usingCustomSMTP = true;
-    const portNum = parseInt(smtpConfig.port, 10) || (smtpConfig.secure ? 465 : 587);
-    transporter = nodemailer.createTransport({
-      host: smtpConfig.host,
-      port: portNum,
-      secure: smtpConfig.secure !== undefined ? smtpConfig.secure : (portNum === 465),
-      auth: {
-        user: smtpConfig.user,
-        pass: smtpConfig.password,
-      },
-    });
-    fromEmail = smtpConfig.user;
-  } else {
-    const gmailUser = process.env.GMAIL_USER;
-    const gmailAppPassword = process.env.GMAIL_APP_PASSWORD;
+  if (activeEmailService === "smtp") {
+    if (smtpConfig && smtpConfig.host && smtpConfig.user && smtpConfig.password) {
+      usingCustomSMTP = true;
+      const portNum = parseInt(smtpConfig.port, 10) || (smtpConfig.secure ? 465 : 587);
+      transporter = nodemailer.createTransport({
+        host: smtpConfig.host,
+        port: portNum,
+        secure: smtpConfig.secure !== undefined ? smtpConfig.secure : (portNum === 465),
+        auth: {
+          user: smtpConfig.user,
+          pass: smtpConfig.password,
+        },
+      });
+      fromEmail = smtpConfig.user;
+    } else {
+      const gmailUser = process.env.GMAIL_USER;
+      const gmailAppPassword = process.env.GMAIL_APP_PASSWORD;
 
-    if (!gmailUser || !gmailAppPassword) {
+      if (!gmailUser || !gmailAppPassword) {
+        return res.status(400).json({
+          success: false,
+          error: "Fitur pengiriman email belum aktif karena SMTP belum dikonfigurasi di Setingan Toko (oleh Admin) maupun di server (GMAIL_USER & GMAIL_APP_PASSWORD).\n\n" +
+                 "Silakan masuk ke Admin Dashboard -> Setingan Toko untuk mengisi konfigurasi SMTP Server Anda sendiri."
+        });
+      }
+
+      transporter = nodemailer.createTransport({
+        service: "gmail",
+        auth: {
+          user: gmailUser,
+          pass: gmailAppPassword,
+        },
+      });
+      fromEmail = gmailUser;
+    }
+  } else if (activeEmailService === "brevo") {
+    if (!activeBrevoApiKey) {
       return res.status(400).json({
         success: false,
-        error: "Fitur pengiriman email belum aktif karena SMTP belum dikonfigurasi di Setingan Toko (oleh Admin) maupun di server (GMAIL_USER & GMAIL_APP_PASSWORD).\n\n" +
-               "Silakan masuk ke Admin Dashboard -> Setingan Toko untuk mengisi konfigurasi SMTP Server Anda sendiri."
+        error: "Fitur pengiriman email belum aktif karena API Key Brevo belum dikonfigurasi di Setingan Toko maupun di server (BREVO_API_KEY)."
       });
     }
-
-    transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        user: gmailUser,
-        pass: gmailAppPassword,
-      },
-    });
-    fromEmail = gmailUser;
   }
 
   try {
@@ -166,19 +193,49 @@ app.post("/api/send-email", async (req, res) => {
       </div>
     `;
 
-    await transporter.sendMail({
-      from: `"DigiMarket System" <${fromEmail}>`,
-      to: to,
-      subject: emailSubject,
-      html: emailHtml,
-    });
+    if (activeEmailService === "brevo") {
+      const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+        method: "POST",
+        headers: {
+          "api-key": activeBrevoApiKey,
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        },
+        body: JSON.stringify({
+          sender: {
+            name: activeBrevoSenderName,
+            email: activeBrevoSenderEmail
+          },
+          to: [
+            {
+              email: to,
+              name: buyerName || "Pelanggan"
+            }
+          ],
+          subject: emailSubject,
+          htmlContent: emailHtml
+        })
+      });
 
-    return res.status(200).json({ success: true, message: "Email sukses terkirim ke " + to });
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Brevo REST API Error (${response.status}): ${errorText}`);
+      }
+    } else {
+      await transporter.sendMail({
+        from: `"DigiMarket System" <${fromEmail}>`,
+        to: to,
+        subject: emailSubject,
+        html: emailHtml,
+      });
+    }
+
+    return res.status(200).json({ success: true, message: `Email sukses terkirim ke ${to} (via ${activeEmailService.toUpperCase()})` });
   } catch (err: any) {
-    console.error("Gagal mengirim email SMTP:", err);
+    console.error("Gagal mengirim email:", err);
     const errorMessage = err?.message || String(err);
     
-    if (!usingCustomSMTP && (errorMessage.includes("535") || errorMessage.toLowerCase().includes("username and password not accepted"))) {
+    if (activeEmailService === "smtp" && !usingCustomSMTP && (errorMessage.includes("535") || errorMessage.toLowerCase().includes("username and password not accepted"))) {
       return res.status(500).json({
         success: false,
         error: `🔐 Gagal Autentikasi SMTP Gmail (Error 535)\n\n` +
@@ -196,41 +253,92 @@ app.post("/api/send-email", async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      error: `Gagal mengirim email via SMTP: ${errorMessage}.\n\n` +
-             (usingCustomSMTP 
-               ? "Silakan periksa kembali konfigurasi SMTP (Host, Port, User, Password, Secure) yang Anda masukkan di Setingan Toko." 
-               : "Pastikan konfigurasi SMTP di panel Settings AI Studio sudah sesuai.")
+      error: `Gagal mengirim email via ${activeEmailService.toUpperCase()}: ${errorMessage}.\n\n` +
+             (activeEmailService === "brevo"
+               ? "Silakan periksa kembali API Key Brevo yang Anda masukkan di Setingan Toko atau file environment."
+               : (usingCustomSMTP 
+                 ? "Silakan periksa kembali konfigurasi SMTP (Host, Port, User, Password, Secure) yang Anda masukkan di Setingan Toko." 
+                 : "Pastikan konfigurasi SMTP di panel Settings AI Studio sudah sesuai."))
     });
   }
 });
 
 // API: Send email notification to Admin for new orders
 app.post("/api/send-admin-notification", async (req, res) => {
-  const { adminEmail, adminName, buyerName, buyerEmail, buyerPhone, transactionId, paymentMethod, totalPrice, items } = req.body;
+  const { 
+    adminEmail, 
+    adminName, 
+    buyerName, 
+    buyerEmail, 
+    buyerPhone, 
+    transactionId, 
+    paymentMethod, 
+    totalPrice, 
+    items,
+    smtpConfig, 
+    emailService, 
+    brevoApiKey, 
+    brevoSenderName, 
+    brevoSenderEmail 
+  } = req.body;
 
   if (!adminEmail) {
     return res.status(400).json({ success: false, error: "Alamat email administrator ('adminEmail') wajib diisi!" });
   }
 
-  const gmailUser = process.env.GMAIL_USER;
-  const gmailAppPassword = process.env.GMAIL_APP_PASSWORD;
+  const activeEmailService = emailService || (process.env.BREVO_API_KEY ? "brevo" : "smtp");
+  const activeBrevoApiKey = brevoApiKey || process.env.BREVO_API_KEY;
+  const activeBrevoSenderEmail = brevoSenderEmail || process.env.BREVO_SENDER_EMAIL || "no-reply@digimarket.com";
+  const activeBrevoSenderName = brevoSenderName || process.env.BREVO_SENDER_NAME || "DigiMarket System";
 
-  if (!gmailUser || !gmailAppPassword) {
-    return res.status(400).json({
-      success: false,
-      error: "Fitur pengiriman email admin belum aktif karena SMTP Gmail belum dikonfigurasi di server."
-    });
+  let transporter: any;
+  let fromEmail = "no-reply@digimarket.com";
+  let usingCustomSMTP = false;
+
+  if (activeEmailService === "smtp") {
+    if (smtpConfig && smtpConfig.host && smtpConfig.user && smtpConfig.password) {
+      usingCustomSMTP = true;
+      const portNum = parseInt(smtpConfig.port, 10) || (smtpConfig.secure ? 465 : 587);
+      transporter = nodemailer.createTransport({
+        host: smtpConfig.host,
+        port: portNum,
+        secure: smtpConfig.secure !== undefined ? smtpConfig.secure : (portNum === 465),
+        auth: {
+          user: smtpConfig.user,
+          pass: smtpConfig.password,
+        },
+      });
+      fromEmail = smtpConfig.user;
+    } else {
+      const gmailUser = process.env.GMAIL_USER;
+      const gmailAppPassword = process.env.GMAIL_APP_PASSWORD;
+
+      if (!gmailUser || !gmailAppPassword) {
+        return res.status(400).json({
+          success: false,
+          error: "Fitur pengiriman email admin belum aktif karena SMTP Gmail belum dikonfigurasi di server."
+        });
+      }
+
+      transporter = nodemailer.createTransport({
+        service: "gmail",
+        auth: {
+          user: gmailUser,
+          pass: gmailAppPassword,
+        },
+      });
+      fromEmail = gmailUser;
+    }
+  } else if (activeEmailService === "brevo") {
+    if (!activeBrevoApiKey) {
+      return res.status(400).json({
+        success: false,
+        error: "Fitur pengiriman email belum aktif karena API Key Brevo belum dikonfigurasi."
+      });
+    }
   }
 
   try {
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        user: gmailUser,
-        pass: gmailAppPassword,
-      },
-    });
-
     const itemsListHtml = items && Array.isArray(items) 
       ? items.map((item: any) => `
           <tr style="border-bottom: 1px solid #e2e8f0;">
@@ -317,14 +425,44 @@ app.post("/api/send-admin-notification", async (req, res) => {
       </div>
     `;
 
-    await transporter.sendMail({
-      from: `"DigiMarket System" <${gmailUser}>`,
-      to: adminEmail,
-      subject: emailSubject,
-      html: emailHtml,
-    });
+    if (activeEmailService === "brevo") {
+      const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+        method: "POST",
+        headers: {
+          "api-key": activeBrevoApiKey,
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        },
+        body: JSON.stringify({
+          sender: {
+            name: activeBrevoSenderName,
+            email: activeBrevoSenderEmail
+          },
+          to: [
+            {
+              email: adminEmail,
+              name: adminName || "Administrator"
+            }
+          ],
+          subject: emailSubject,
+          htmlContent: emailHtml
+        })
+      });
 
-    return res.status(200).json({ success: true, message: `Email notifikasi pesanan dikirim ke Admin ${adminEmail}` });
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Brevo REST API Error (${response.status}): ${errorText}`);
+      }
+    } else {
+      await transporter.sendMail({
+        from: `"DigiMarket System" <${fromEmail}>`,
+        to: adminEmail,
+        subject: emailSubject,
+        html: emailHtml,
+      });
+    }
+
+    return res.status(200).json({ success: true, message: `Email notifikasi pesanan dikirim ke Admin ${adminEmail} (via ${activeEmailService.toUpperCase()})` });
   } catch (err: any) {
     console.error("Gagal mengirim email notifikasi ke admin:", err);
     return res.status(500).json({ success: false, error: err?.message || String(err) });

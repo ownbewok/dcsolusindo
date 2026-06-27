@@ -28,6 +28,17 @@ export const ProductCard: React.FC<ProductCardProps> = ({
     maximumFractionDigits: 0,
   }).format(product.price);
 
+  const formattedOriginalPrice = product.originalPrice ? new Intl.NumberFormat('id-ID', {
+    style: 'currency',
+    currency: 'IDR',
+    maximumFractionDigits: 0,
+  }).format(product.originalPrice) : null;
+
+  // Calculate discount percentage if original price exists
+  const discountPct = product.originalPrice && product.originalPrice > product.price
+    ? Math.round(((product.originalPrice - product.price) / product.originalPrice) * 100)
+    : null;
+
   return (
     <div className="group bg-white rounded-2xl border border-slate-100 overflow-hidden shadow-xs hover:shadow-md transition-all duration-300 flex flex-col h-full hover:-translate-y-1">
       {/* Product Image & Badges */}
@@ -38,11 +49,18 @@ export const ProductCard: React.FC<ProductCardProps> = ({
           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
           referrerPolicy="no-referrer"
         />
-        {product.isFeatured && (
-          <span className="absolute top-3 left-3 px-2.5 py-1 text-[10px] font-semibold text-emerald-700 bg-emerald-50 rounded-full border border-emerald-200 uppercase tracking-wider">
-            Terpopuler
-          </span>
-        )}
+        <div className="absolute top-3 left-3 flex flex-col gap-1.5 items-start">
+          {product.isFeatured && (
+            <span className="px-2.5 py-1 text-[10px] font-black text-emerald-700 bg-emerald-50 rounded-full border border-emerald-200 uppercase tracking-wider shadow-xs">
+              Terpopuler
+            </span>
+          )}
+          {product.isDiscounted && (
+            <span className="px-2.5 py-1 text-[10px] font-black text-rose-700 bg-rose-50 rounded-full border border-rose-200 uppercase tracking-wider shadow-xs">
+              Diskon {discountPct || 'Promo'}%
+            </span>
+          )}
+        </div>
         <span className="absolute top-3 right-3 px-2 py-0.5 text-[10px] font-medium text-slate-600 bg-white/95 backdrop-blur-xs rounded-md shadow-xs">
           {product.licenseType}
         </span>
@@ -87,7 +105,12 @@ export const ProductCard: React.FC<ProductCardProps> = ({
         <div className="flex items-center justify-between gap-2 mt-auto">
           <div className="flex flex-col">
             <span className="text-[10px] text-slate-400">Harga Aset</span>
-            <span className="text-lg font-black text-slate-900">{formattedPrice}</span>
+            <div className="flex items-baseline gap-1.5 flex-wrap">
+              <span className="text-lg font-black text-slate-900">{formattedPrice}</span>
+              {formattedOriginalPrice && (
+                <span className="text-xs text-slate-400 line-through font-medium">{formattedOriginalPrice}</span>
+              )}
+            </div>
           </div>
           
           <div className="flex gap-1.5">

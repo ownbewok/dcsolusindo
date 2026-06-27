@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
-import { Product, Review, CartItem, Transaction, SystemLog, PaymentStatus, ShopBranding, VaultUser, PaymentMethodConfig, Complaint, AdminUser, GithubUser, PromoCode } from './types';
+import React, { useState, useEffect, useRef } from 'react';
+import { Product, Review, CartItem, Transaction, SystemLog, PaymentStatus, ShopBranding, VaultUser, PaymentMethodConfig, Complaint, AdminUser, GithubUser, PromoCode, SilaturahmiMessage } from './types';
 import { initialProducts, initialReviews } from './data/initialProducts';
 import { ProductCard } from './components/ProductCard';
 import { ProductDetailModal } from './components/ProductDetailModal';
@@ -52,8 +52,18 @@ import {
   bulkPushToFirebase,
   purgeCollectionFromFirebase
 } from './lib/firebaseSync';
+import { onSnapshot, collection, doc } from 'firebase/firestore';
+import { db } from './firebase';
 
 export default function App() {
+  // Refs to prevent infinite synchronization write loops
+  const lastSyncedBrandingRef = useRef<string>('');
+  const lastSyncedCategoriesRef = useRef<string>('');
+  const lastSyncedPaymentMethodsRef = useRef<string>('');
+  const lastSyncedVaultUsersRef = useRef<string>('');
+  const lastSyncedAdminUsersRef = useRef<string>('');
+  const lastSyncedPromoCodesRef = useRef<string>('');
+
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       const savedTheme = localStorage.getItem('digimarket_theme');
@@ -105,7 +115,30 @@ export default function App() {
   });
 
   const [cart, setCart] = useState<CartItem[]>([]);
+  const [showAllProducts, setShowAllProducts] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'belanja' | 'vault' | 'seller' | 'admin'>('belanja');
+
+  const [silaturahmiMessages, setSilaturahmiMessages] = useState<SilaturahmiMessage[]>(() => {
+    const saved = localStorage.getItem('digimarket_silaturahmi');
+    return saved ? JSON.parse(saved) : [
+      {
+        id: 'msg-1',
+        name: 'Admin Toko',
+        message: 'Selamat datang di Pojok Silaturahmi! Silakan tinggalkan pesan sapaan hangat atau feedback di sini. Mari jalin tali silaturahmi! 🤝✨',
+        timestamp: new Date(Date.now() - 3600000 * 5).toISOString(),
+        avatarColor: 'bg-indigo-500 text-white',
+        role: 'Creator'
+      },
+      {
+        id: 'msg-2',
+        name: 'Andi Wijaya',
+        message: 'Halo semua, izin berkunjung! Tokonya keren banget, pembayarannya instan dan lisensinya langsung dikirim. Sukses selalu gan!',
+        timestamp: new Date(Date.now() - 3600000 * 2).toISOString(),
+        avatarColor: 'bg-emerald-500 text-white',
+        role: 'Pembeli'
+      }
+    ];
+  });
   
   const [branding, setBranding] = useState<ShopBranding>(() => {
     const saved = localStorage.getItem('digimarket_shop_branding');
@@ -131,7 +164,13 @@ export default function App() {
           smtpUser: parsed.smtpUser || '',
           smtpPassword: parsed.smtpPassword || '',
           smtpSecure: parsed.smtpSecure !== undefined ? parsed.smtpSecure : true,
+          brevoApiKey: parsed.brevoApiKey || '',
+          brevoSenderName: parsed.brevoSenderName || '',
+          brevoSenderEmail: parsed.brevoSenderEmail || '',
+          emailService: parsed.emailService || 'smtp',
           whatsappNumber: parsed.whatsappNumber || '6282288882512',
+          fontFamily: parsed.fontFamily || 'inter',
+          productsLimit: parsed.productsLimit || 6,
         };
       } catch (e) {
         // ignore
@@ -156,14 +195,28 @@ export default function App() {
       smtpUser: '',
       smtpPassword: '',
       smtpSecure: true,
+      brevoApiKey: '',
+      brevoSenderName: '',
+      brevoSenderEmail: '',
+      emailService: 'smtp',
       whatsappNumber: '6282288882512',
+      fontFamily: 'inter',
+      productsLimit: 6,
     };
   });
 
   useEffect(() => {
     localStorage.setItem('digimarket_shop_branding', JSON.stringify(branding));
-    autoSyncEntity('config', 'shop_branding', branding);
+    const brandingStr = JSON.stringify(branding);
+    if (lastSyncedBrandingRef.current !== brandingStr) {
+      lastSyncedBrandingRef.current = brandingStr;
+      autoSyncEntity('config', 'shop_branding', branding);
+    }
   }, [branding]);
+
+  useEffect(() => {
+    localStorage.setItem('digimarket_silaturahmi', JSON.stringify(silaturahmiMessages));
+  }, [silaturahmiMessages]);
 
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethodConfig[]>(() => {
     const saved = localStorage.getItem('digimarket_payment_methods');
@@ -268,7 +321,11 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem('digimarket_payment_methods', JSON.stringify(paymentMethods));
-    autoSyncEntity('config', 'payment_methods', { list: paymentMethods });
+    const str = JSON.stringify(paymentMethods);
+    if (lastSyncedPaymentMethodsRef.current !== str) {
+      lastSyncedPaymentMethodsRef.current = str;
+      autoSyncEntity('config', 'payment_methods', { list: paymentMethods });
+    }
   }, [paymentMethods]);
 
   const [complaints, setComplaints] = useState<Complaint[]>(() => {
@@ -298,7 +355,11 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem('digimarket_categories', JSON.stringify(categories));
-    autoSyncEntity('config', 'categories', { list: categories });
+    const str = JSON.stringify(categories);
+    if (lastSyncedCategoriesRef.current !== str) {
+      lastSyncedCategoriesRef.current = str;
+      autoSyncEntity('config', 'categories', { list: categories });
+    }
   }, [categories]);
 
   const [vaultUsers, setVaultUsers] = useState<VaultUser[]>(() => {
@@ -323,7 +384,11 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem('digimarket_vault_users', JSON.stringify(vaultUsers));
-    autoSyncEntity('config', 'vault_users', { list: vaultUsers });
+    const str = JSON.stringify(vaultUsers);
+    if (lastSyncedVaultUsersRef.current !== str) {
+      lastSyncedVaultUsersRef.current = str;
+      autoSyncEntity('config', 'vault_users', { list: vaultUsers });
+    }
   }, [vaultUsers]);
 
   const [adminUsers, setAdminUsers] = useState<AdminUser[]>(() => {
@@ -355,7 +420,11 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem('digimarket_admin_users', JSON.stringify(adminUsers));
-    autoSyncEntity('config', 'admin_users', { list: adminUsers });
+    const str = JSON.stringify(adminUsers);
+    if (lastSyncedAdminUsersRef.current !== str) {
+      lastSyncedAdminUsersRef.current = str;
+      autoSyncEntity('config', 'admin_users', { list: adminUsers });
+    }
   }, [adminUsers]);
 
   const [isAdminLoggedIn, setIsAdminLoggedIn] = useState<boolean>(() => {
@@ -387,7 +456,11 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem('digimarket_promo_codes', JSON.stringify(promoCodes));
-    autoSyncEntity('config', 'promo_codes', { list: promoCodes });
+    const str = JSON.stringify(promoCodes);
+    if (lastSyncedPromoCodesRef.current !== str) {
+      lastSyncedPromoCodesRef.current = str;
+      autoSyncEntity('config', 'promo_codes', { list: promoCodes });
+    }
   }, [promoCodes]);
 
   // GitHub OAuth Integration States & Handlers
@@ -480,6 +553,13 @@ export default function App() {
   const [isComplaintModalOpen, setIsComplaintModalOpen] = useState(false);
   const [isWishlistOpen, setIsWishlistOpen] = useState(false);
 
+  // Pojok Silaturahmi Chat States
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [chatName, setChatName] = useState('');
+  const [chatRole, setChatRole] = useState('Tamu');
+  const [chatMessage, setChatMessage] = useState('');
+  const [isSubmittingChat, setIsSubmittingChat] = useState(false);
+
   // Wishlist States & Handlers
   const [wishlist, setWishlist] = useState<Product[]>(() => {
     const saved = localStorage.getItem('digimarket_wishlist');
@@ -513,6 +593,170 @@ export default function App() {
   const [isDbLoading, setIsDbLoading] = useState<boolean>(true);
   const [isFirebaseConnected, setIsFirebaseConnected] = useState<boolean>(false);
   const [firebaseError, setFirebaseError] = useState<string | null>(null);
+
+  // Real-Time Autosync Engine States
+  const [isAutosyncEnabled, setIsAutosyncEnabled] = useState<boolean>(() => {
+    const saved = localStorage.getItem('digimarket_autosync');
+    return saved !== null ? saved === 'true' : true;
+  });
+  const [lastAutosyncTime, setLastAutosyncTime] = useState<string | null>(null);
+
+  useEffect(() => {
+    localStorage.setItem('digimarket_autosync', String(isAutosyncEnabled));
+  }, [isAutosyncEnabled]);
+
+  // Real-Time onSnapshot Firestore Subscriber
+  useEffect(() => {
+    if (!isAutosyncEnabled) {
+      return;
+    }
+
+    console.log('⚡ Real-time Autosync engine activated. Listening to Firestore collections...');
+    const unsubscribes: (() => void)[] = [];
+
+    const formatTime = () => {
+      const now = new Date();
+      return now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    };
+
+    const handleAutosyncError = (entity: string, err: any) => {
+      console.error(`Autosync ${entity} failed:`, err);
+      const errMsg = err?.message || String(err);
+      if (
+        errMsg.toLowerCase().includes('quota') || 
+        errMsg.toLowerCase().includes('exhausted') || 
+        errMsg.toLowerCase().includes('permission-denied') || 
+        errMsg.toLowerCase().includes('resource-exhausted') ||
+        err?.code === 'resource-exhausted'
+      ) {
+        setFirebaseError(errMsg);
+        setIsAutosyncEnabled(false);
+      }
+    };
+
+    try {
+      // 1. Listen to products
+      const unsubProducts = onSnapshot(collection(db, 'products'), (snapshot) => {
+        const cloudProducts: Product[] = [];
+        snapshot.forEach((d) => {
+          cloudProducts.push(d.data() as Product);
+        });
+        if (cloudProducts.length > 0) {
+          setProducts(cloudProducts);
+          setLastAutosyncTime(formatTime());
+        }
+      }, (err) => handleAutosyncError('products', err));
+      unsubscribes.push(unsubProducts);
+
+      // 2. Listen to reviews
+      const unsubReviews = onSnapshot(collection(db, 'reviews'), (snapshot) => {
+        const cloudReviews: Review[] = [];
+        snapshot.forEach((d) => {
+          cloudReviews.push(d.data() as Review);
+        });
+        if (cloudReviews.length > 0) {
+          setReviews(cloudReviews);
+          setLastAutosyncTime(formatTime());
+        }
+      }, (err) => handleAutosyncError('reviews', err));
+      unsubscribes.push(unsubReviews);
+
+      // 3. Listen to transactions
+      const unsubTransactions = onSnapshot(collection(db, 'transactions'), (snapshot) => {
+        const cloudTransactions: Transaction[] = [];
+        snapshot.forEach((d) => {
+          cloudTransactions.push(d.data() as Transaction);
+        });
+        setTransactions(cloudTransactions.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
+        setLastAutosyncTime(formatTime());
+      }, (err) => handleAutosyncError('transactions', err));
+      unsubscribes.push(unsubTransactions);
+
+      // 4. Listen to complaints
+      const unsubComplaints = onSnapshot(collection(db, 'complaints'), (snapshot) => {
+        const cloudComplaints: Complaint[] = [];
+        snapshot.forEach((d) => {
+          cloudComplaints.push(d.data() as Complaint);
+        });
+        setComplaints(cloudComplaints.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
+        setLastAutosyncTime(formatTime());
+      }, (err) => handleAutosyncError('complaints', err));
+      unsubscribes.push(unsubComplaints);
+
+      // 5. Listen to system_logs
+      const unsubLogs = onSnapshot(collection(db, 'system_logs'), (snapshot) => {
+        const cloudLogs: SystemLog[] = [];
+        snapshot.forEach((d) => {
+          cloudLogs.push(d.data() as SystemLog);
+        });
+        if (cloudLogs.length > 0) {
+          setSystemLogs(cloudLogs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
+          setLastAutosyncTime(formatTime());
+        }
+      }, (err) => handleAutosyncError('system_logs', err));
+      unsubscribes.push(unsubLogs);
+
+      // 6. Listen to shop_branding doc in config collection
+      const unsubBranding = onSnapshot(doc(db, 'config', 'shop_branding'), (snap) => {
+        if (snap.exists()) {
+          const data = snap.data();
+          const { id, syncSource, lastSyncedAt, ...cleanBranding } = data;
+          setBranding((prev) => {
+            const merged = { ...prev, ...cleanBranding };
+            lastSyncedBrandingRef.current = JSON.stringify(merged);
+            return merged;
+          });
+          setLastAutosyncTime(formatTime());
+        }
+      }, (err) => handleAutosyncError('shop_branding', err));
+      unsubscribes.push(unsubBranding);
+
+      // 7. Listen to other config documents
+      const configDocs = [
+        { id: 'categories', setter: setCategories, key: 'list', ref: lastSyncedCategoriesRef },
+        { id: 'payment_methods', setter: setPaymentMethods, key: 'list', ref: lastSyncedPaymentMethodsRef },
+        { id: 'vault_users', setter: setVaultUsers, key: 'list', ref: lastSyncedVaultUsersRef },
+        { id: 'admin_users', setter: setAdminUsers, key: 'list', ref: lastSyncedAdminUsersRef },
+        { id: 'promo_codes', setter: setPromoCodes, key: 'list', ref: lastSyncedPromoCodesRef },
+      ];
+
+      configDocs.forEach((cfg) => {
+        const unsubCfg = onSnapshot(doc(db, 'config', cfg.id), (snap) => {
+          if (snap.exists()) {
+            const data = snap.data();
+            if (data && Array.isArray(data[cfg.key])) {
+              cfg.ref.current = JSON.stringify(data[cfg.key]);
+              cfg.setter(data[cfg.key]);
+              setLastAutosyncTime(formatTime());
+            }
+          }
+        }, (err) => handleAutosyncError(`config/${cfg.id}`, err));
+        unsubscribes.push(unsubCfg);
+      });
+
+      // 8. Listen to silaturahmi messages
+      const unsubSilaturahmi = onSnapshot(collection(db, 'silaturahmi'), (snapshot) => {
+        const cloudMessages: SilaturahmiMessage[] = [];
+        snapshot.forEach((d) => {
+          cloudMessages.push(d.data() as SilaturahmiMessage);
+        });
+        if (cloudMessages.length > 0) {
+          const sorted = cloudMessages.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+          setSilaturahmiMessages(sorted);
+          setLastAutosyncTime(formatTime());
+        }
+      }, (err) => handleAutosyncError('silaturahmi', err));
+      unsubscribes.push(unsubSilaturahmi);
+
+    } catch (err) {
+      console.error('Error starting real-time autosync subscription:', err);
+    }
+
+    return () => {
+      console.log('🧹 Cleaning up real-time autosync listeners...');
+      unsubscribes.forEach((unsub) => unsub());
+    };
+  }, [isAutosyncEnabled]);
 
   useEffect(() => {
     const initializeDatabaseFromFirestore = async () => {
@@ -554,46 +798,58 @@ export default function App() {
         const brandingDoc = await fetchDocFromFirebase('config', 'shop_branding');
         if (brandingDoc) {
           const { id, syncSource, lastSyncedAt, ...cleanBranding } = brandingDoc;
-          setBranding(prev => ({
-            ...prev,
-            ...cleanBranding
-          }));
+          setBranding(prev => {
+            const merged = { ...prev, ...cleanBranding };
+            lastSyncedBrandingRef.current = JSON.stringify(merged);
+            return merged;
+          });
         } else {
+          lastSyncedBrandingRef.current = JSON.stringify(branding);
           await syncToFirebase('config', 'shop_branding', branding);
         }
 
         const categoriesDoc = await fetchDocFromFirebase('config', 'categories');
         if (categoriesDoc && Array.isArray(categoriesDoc.list)) {
+          lastSyncedCategoriesRef.current = JSON.stringify(categoriesDoc.list);
           setCategories(categoriesDoc.list);
         } else {
+          lastSyncedCategoriesRef.current = JSON.stringify(categories);
           await syncToFirebase('config', 'categories', { list: categories });
         }
 
         const paymentMethodsDoc = await fetchDocFromFirebase('config', 'payment_methods');
         if (paymentMethodsDoc && Array.isArray(paymentMethodsDoc.list)) {
+          lastSyncedPaymentMethodsRef.current = JSON.stringify(paymentMethodsDoc.list);
           setPaymentMethods(paymentMethodsDoc.list);
         } else {
+          lastSyncedPaymentMethodsRef.current = JSON.stringify(paymentMethods);
           await syncToFirebase('config', 'payment_methods', { list: paymentMethods });
         }
 
         const vaultUsersDoc = await fetchDocFromFirebase('config', 'vault_users');
         if (vaultUsersDoc && Array.isArray(vaultUsersDoc.list)) {
+          lastSyncedVaultUsersRef.current = JSON.stringify(vaultUsersDoc.list);
           setVaultUsers(vaultUsersDoc.list);
         } else {
+          lastSyncedVaultUsersRef.current = JSON.stringify(vaultUsers);
           await syncToFirebase('config', 'vault_users', { list: vaultUsers });
         }
 
         const adminUsersDoc = await fetchDocFromFirebase('config', 'admin_users');
         if (adminUsersDoc && Array.isArray(adminUsersDoc.list)) {
+          lastSyncedAdminUsersRef.current = JSON.stringify(adminUsersDoc.list);
           setAdminUsers(adminUsersDoc.list);
         } else {
+          lastSyncedAdminUsersRef.current = JSON.stringify(adminUsers);
           await syncToFirebase('config', 'admin_users', { list: adminUsers });
         }
 
         const promoCodesDoc = await fetchDocFromFirebase('config', 'promo_codes');
         if (promoCodesDoc && Array.isArray(promoCodesDoc.list)) {
+          lastSyncedPromoCodesRef.current = JSON.stringify(promoCodesDoc.list);
           setPromoCodes(promoCodesDoc.list);
         } else {
+          lastSyncedPromoCodesRef.current = JSON.stringify(promoCodes);
           await syncToFirebase('config', 'promo_codes', { list: promoCodes });
         }
 
@@ -613,10 +869,47 @@ export default function App() {
           setSystemLogs([defaultLog]);
         }
 
+        // 7. Fetch Silaturahmi messages
+        let cloudSilaturahmi = await fetchCollectionFromFirebase('silaturahmi');
+        if (cloudSilaturahmi.length === 0) {
+          console.log('Firestore silaturahmi collection is empty. Seeding initial messages...');
+          const initialSilaturahmiList = [
+            {
+              id: 'msg-1',
+              name: 'Admin Toko',
+              message: 'Selamat datang di Pojok Silaturahmi! Silakan tinggalkan pesan sapaan hangat atau feedback di sini. Mari jalin tali silaturahmi! 🤝✨',
+              timestamp: new Date(Date.now() - 3600000 * 5).toISOString(),
+              avatarColor: 'bg-indigo-500 text-white',
+              role: 'Creator'
+            },
+            {
+              id: 'msg-2',
+              name: 'Andi Wijaya',
+              message: 'Halo semua, izin berkunjung! Tokonya keren banget, pembayarannya instan dan lisensinya langsung dikirim. Sukses selalu gan!',
+              timestamp: new Date(Date.now() - 3600000 * 2).toISOString(),
+              avatarColor: 'bg-emerald-500 text-white',
+              role: 'Pembeli'
+            }
+          ];
+          await bulkPushToFirebase('silaturahmi', initialSilaturahmiList, 'id');
+          cloudSilaturahmi = initialSilaturahmiList;
+        }
+        setSilaturahmiMessages(cloudSilaturahmi.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()));
+
         setIsFirebaseConnected(true);
       } catch (err: any) {
         console.error('Firestore init failed. Operating in local-fallback mode:', err);
-        setFirebaseError(err.message || String(err));
+        const errMsg = err.message || String(err);
+        setFirebaseError(errMsg);
+        if (
+          errMsg.toLowerCase().includes('quota') || 
+          errMsg.toLowerCase().includes('exhausted') || 
+          errMsg.toLowerCase().includes('permission-denied') || 
+          errMsg.toLowerCase().includes('resource-exhausted') ||
+          err?.code === 'resource-exhausted'
+        ) {
+          setIsAutosyncEnabled(false);
+        }
       } finally {
         setIsDbLoading(false);
       }
@@ -701,7 +994,11 @@ export default function App() {
             user: branding.smtpUser || '',
             password: branding.smtpPassword || '',
             secure: branding.smtpSecure !== undefined ? branding.smtpSecure : true,
-          }
+          },
+          emailService: branding.emailService || 'smtp',
+          brevoApiKey: branding.brevoApiKey || '',
+          brevoSenderName: branding.brevoSenderName || '',
+          brevoSenderEmail: branding.brevoSenderEmail || '',
         }),
       });
       let data;
@@ -740,6 +1037,17 @@ export default function App() {
             paymentMethod: trx.paymentMethod,
             totalPrice: trx.totalPrice,
             items: trx.items,
+            smtpConfig: {
+              host: branding.smtpHost || '',
+              port: branding.smtpPort || '',
+              user: branding.smtpUser || '',
+              password: branding.smtpPassword || '',
+              secure: branding.smtpSecure !== undefined ? branding.smtpSecure : true,
+            },
+            emailService: branding.emailService || 'smtp',
+            brevoApiKey: branding.brevoApiKey || '',
+            brevoSenderName: branding.brevoSenderName || '',
+            brevoSenderEmail: branding.brevoSenderEmail || '',
           }),
         });
         let data;
@@ -1340,8 +1648,13 @@ export default function App() {
     );
   }
 
+  const fontClass = 
+    branding.fontFamily === 'ubuntu' ? 'font-ubuntu' :
+    branding.fontFamily === 'noteworthy' ? 'font-noteworthy' :
+    'font-sans';
+
   return (
-    <div className="min-h-screen bg-slate-50/40 text-slate-800 font-sans flex flex-col antialiased">
+    <div className={`min-h-screen bg-slate-50/40 text-slate-800 ${fontClass} flex flex-col antialiased`}>
       {/* Dynamic Header */}
       <header className="sticky top-0 z-40 bg-white/90 backdrop-blur-md border-b border-slate-100 shadow-xs px-6 py-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
@@ -1400,6 +1713,34 @@ export default function App() {
 
           {/* Cart & Notifications Bell Panel */}
           <div className="flex items-center gap-3">
+
+            {/* Real-time Autosync Status Pill */}
+            <div className="flex items-center gap-2 px-2.5 py-1.5 bg-slate-50 border border-slate-100 rounded-xl select-none" title="Real-time Cloud Database Autosync status">
+              <div className="relative flex h-2 w-2">
+                <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${isAutosyncEnabled ? 'bg-emerald-400' : 'bg-slate-300'}`}></span>
+                <span className={`relative inline-flex rounded-full h-2 w-2 ${isAutosyncEnabled ? 'bg-emerald-500' : 'bg-slate-400'}`}></span>
+              </div>
+              <div className="flex flex-col text-left">
+                <div className="flex items-center gap-1">
+                  <span className="text-[8px] font-black text-slate-700 uppercase tracking-wider leading-none">Auto-Sync</span>
+                  <button 
+                    onClick={() => setIsAutosyncEnabled(!isAutosyncEnabled)}
+                    className={`text-[8px] font-extrabold px-1 py-0.5 rounded-sm uppercase tracking-tighter cursor-pointer ${
+                      isAutosyncEnabled 
+                        ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' 
+                        : 'bg-slate-200 text-slate-600 hover:bg-slate-300'
+                    }`}
+                  >
+                    {isAutosyncEnabled ? 'ON' : 'OFF'}
+                  </button>
+                </div>
+                <span className="text-[7.5px] text-slate-400 font-bold leading-none mt-0.5">
+                  {isAutosyncEnabled 
+                    ? (lastAutosyncTime ? `${lastAutosyncTime}` : 'Menghubungkan...') 
+                    : 'Offline Mode'}
+                </span>
+              </div>
+            </div>
 
 
             {/* Automatic Email Notification Log Panel Button */}
@@ -1535,6 +1876,33 @@ export default function App() {
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-6 space-y-6">
 
+        {firebaseError && (
+          <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/30 rounded-2xl p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xs animate-in fade-in duration-300">
+            <div className="flex items-start gap-3.5">
+              <div className="p-2.5 rounded-xl bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 shrink-0">
+                <Database className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="text-sm font-bold text-amber-800 dark:text-amber-300 tracking-tight flex items-center gap-1.5">
+                  ⚠️ Kuota Database Terlampaui — Mode Fallback Lokal Aktif
+                </h4>
+                <p className="text-xs text-slate-600 dark:text-slate-400 mt-1.5 leading-relaxed max-w-4xl">
+                  Firestore Cloud Database telah mencapai batas penggunaan gratis harian ({firebaseError.includes('quota') || firebaseError.includes('exhausted') ? 'Quota limit exceeded' : firebaseError}). 
+                  <span className="block mt-1 font-semibold text-slate-800 dark:text-slate-300">
+                    Sistem secara otomatis mengaktifkan Mode Sandbox Offline (Local Storage). Anda tetap dapat membuat transaksi simulasi, mengelola produk, menulis ulasan, mengirim pesan silaturahmi, dan mengubah pengaturan secara penuh dengan lancar dan aman di browser Anda!
+                  </span>
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setFirebaseError(null)}
+              className="px-3 py-1.5 text-[10px] font-bold uppercase bg-amber-100 hover:bg-amber-200 dark:bg-amber-900/30 dark:hover:bg-amber-900/50 text-amber-700 dark:text-amber-400 rounded-lg transition-all cursor-pointer shrink-0"
+            >
+              Paham
+            </button>
+          </div>
+        )}
+
         {/* TAB 1: Digital Asset Storefront */}
         {activeTab === 'belanja' && (
           <div className="space-y-6">
@@ -1612,134 +1980,289 @@ export default function App() {
               </div>
             </div>
 
-            {/* Products grid container with layout style configurations */}
-            {sortedProducts.length === 0 ? (
-              <div className="text-center py-16 bg-white border border-slate-100 rounded-3xl p-8 shadow-xs">
-                <HelpCircle className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-                <h3 className="text-sm font-bold text-slate-800">Aset tidak ditemukan</h3>
-                <p className="text-xs text-slate-400 mt-1 max-w-xs mx-auto">
-                  Coba ubah kata kunci pencarian Anda atau kembalikan kategori ke "Semua" untuk menemukan produk terbaik kami.
-                </p>
-              </div>
-            ) : branding.layoutStyle === 'minimal' ? (
-              // Minimalist Horizontal Row List
-              <div className="space-y-4">
-                {sortedProducts.map((prod) => (
-                  <div key={prod.id} className="bg-white border border-slate-100 hover:border-slate-300 rounded-2xl p-4 flex flex-col sm:flex-row items-center gap-4 transition-all shadow-xs">
-                    <div className="w-20 h-20 bg-slate-100 rounded-xl overflow-hidden shrink-0">
-                      <img src={prod.thumbnailUrl} alt={prod.name} className="w-full h-full object-cover" />
-                    </div>
-                    <div className="flex-1 text-center sm:text-left">
-                      <div className="flex items-center justify-center sm:justify-start gap-2">
-                        <span className="text-[10px] font-bold text-sky-600 bg-sky-50 px-2 py-0.5 rounded-md uppercase">{prod.category}</span>
-                        <span className="text-xs text-amber-500 font-bold flex items-center gap-0.5">⭐ {prod.rating}</span>
-                      </div>
-                      <h4 className="text-xs font-black text-slate-800 mt-1.5">{prod.name}</h4>
-                      <p className="text-[10px] text-slate-400 mt-0.5 line-clamp-1">{prod.description}</p>
-                    </div>
-                    <div className="text-center sm:text-right shrink-0">
-                      <span className="block text-xs font-black text-rose-600 font-mono">Rp {prod.price.toLocaleString('id-ID')}</span>
-                      <span className="text-[9px] text-slate-400 block mt-0.5">Sisa {prod.licenseKeysPool.length} Lisensi</span>
-                    </div>
-                    <div className="flex gap-2 w-full sm:w-auto">
-                      <button
-                        onClick={() => setSelectedProduct(prod)}
-                        className="flex-1 sm:flex-none px-3.5 py-2 border border-slate-200 hover:bg-slate-50 text-[11px] font-bold rounded-xl transition-all cursor-pointer"
-                      >
-                        Detail
-                      </button>
-                      <button
-                        onClick={() => handleAddToCart(prod)}
-                        className="flex-1 sm:flex-none px-4 py-2 bg-slate-900 hover:bg-sky-600 text-white text-[11px] font-black rounded-xl transition-all cursor-pointer"
-                      >
-                        + Beli
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : branding.layoutStyle === 'bento' ? (
-              // Bento Grid Premium
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                {sortedProducts.map((prod, index) => {
-                  const isLarge = index === 0 || index === 4;
-                  return (
-                    <div 
-                      key={prod.id} 
-                      className={`bg-white border border-slate-100 hover:border-slate-200 rounded-3xl overflow-hidden transition-all shadow-xs flex flex-col justify-between group relative ${
-                        isLarge ? 'md:col-span-2 md:row-span-2 p-6' : 'p-4'
-                      }`}
-                    >
+            {/* Promo & Popular Modules (Only shown on main landing) */}
+            {searchQuery === '' && selectedCategory === 'Semua' && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-6 animate-in fade-in duration-300">
+                {/* Module 1: Discount Products */}
+                <div className="bg-gradient-to-br from-rose-50/70 to-orange-50/40 border border-rose-100 rounded-3xl p-6 shadow-xs flex flex-col space-y-4">
+                  <div className="flex items-center justify-between pb-2 border-b border-rose-100/60">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xl">🏷️</span>
                       <div>
-                        <div className={`relative overflow-hidden rounded-2xl bg-slate-100 mb-4 ${isLarge ? 'h-52' : 'h-36'}`}>
-                          <img 
-                            src={prod.thumbnailUrl} 
-                            alt={prod.name} 
-                            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" 
-                          />
-                          <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5">
-                            <span className="text-[9px] font-black tracking-wider uppercase bg-slate-900/90 text-white px-2 py-0.5 rounded-md backdrop-blur-xs">
-                              {prod.category}
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-1">
-                            <span className="text-amber-500 text-xs font-bold">★ {prod.rating}</span>
-                            <span className="text-[9px] text-slate-400 font-medium">({prod.reviewsCount} review)</span>
-                          </div>
-                          <h4 className={`font-black text-slate-950 tracking-tight leading-snug group-hover:text-sky-600 transition-colors ${
-                            isLarge ? 'text-sm' : 'text-xs'
-                          }`}>
-                            {prod.name}
-                          </h4>
-                          <p className="text-[10px] text-slate-400 line-clamp-2 leading-relaxed">
-                            {prod.description}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
-                        <div>
-                          <span className="block text-[8px] font-bold text-slate-400 uppercase tracking-wider">Harga Lisensi</span>
-                          <span className="text-xs font-black text-rose-600 font-mono">Rp {prod.price.toLocaleString('id-ID')}</span>
-                        </div>
-                        <div className="flex gap-1">
-                          <button
-                            onClick={() => setSelectedProduct(prod)}
-                            className="p-2 border border-slate-150 hover:bg-slate-50 text-slate-600 hover:text-slate-900 rounded-xl transition-all cursor-pointer"
-                            title="Detail"
-                          >
-                            👁️
-                          </button>
-                          <button
-                            onClick={() => handleAddToCart(prod)}
-                            className="px-3.5 py-2 bg-slate-900 hover:bg-sky-600 text-white text-[10px] font-black rounded-xl transition-all cursor-pointer"
-                          >
-                            + Keranjang
-                          </button>
-                        </div>
+                        <h3 className="text-sm font-black text-slate-900">Promo Diskon Spesial</h3>
+                        <p className="text-[10px] text-slate-500 font-sans">Aset digital premium dengan harga miring terbatas</p>
                       </div>
                     </div>
-                  );
-                })}
-              </div>
-            ) : (
-              // Standard Grid Layout (default)
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                {sortedProducts.map((prod) => (
-                  <ProductCard
-                    key={prod.id}
-                    product={prod}
-                    onViewDetail={(p) => setSelectedProduct(p)}
-                    onAddToCart={(p) => handleAddToCart(p)}
-                    isWishlisted={wishlist.some((item) => item.id === prod.id)}
-                    onToggleWishlist={handleToggleWishlist}
-                  />
-                ))}
+                    <span className="px-2.5 py-1 text-[9px] font-black text-rose-700 bg-rose-100 rounded-full uppercase tracking-wider font-mono">Sale Up To 30%</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {products.filter(p => p.isDiscounted).slice(0, 2).map(prod => {
+                      const formattedPrice = new Intl.NumberFormat('id-ID', {
+                        style: 'currency',
+                        currency: 'IDR',
+                        maximumFractionDigits: 0,
+                      }).format(prod.price);
+                      const formattedOriginal = prod.originalPrice ? new Intl.NumberFormat('id-ID', {
+                        style: 'currency',
+                        currency: 'IDR',
+                        maximumFractionDigits: 0,
+                      }).format(prod.originalPrice) : '';
+                      const pct = prod.originalPrice ? Math.round(((prod.originalPrice - prod.price) / prod.originalPrice) * 100) : 0;
+                      return (
+                        <div key={prod.id} className="bg-white border border-rose-50 rounded-2xl p-3.5 hover:shadow-md transition-all flex flex-col justify-between h-full group relative">
+                          <span className="absolute top-2.5 right-2.5 px-2 py-0.5 text-[9px] font-black text-white bg-rose-500 rounded-md z-10">
+                            -{pct}%
+                          </span>
+                          <div className="space-y-2">
+                            <div className="aspect-video w-full rounded-xl bg-slate-50 overflow-hidden cursor-pointer" onClick={() => setSelectedProduct(prod)}>
+                              <img src={prod.image} alt={prod.name} className="w-full h-full object-cover group-hover:scale-102 transition-transform duration-300" referrerPolicy="no-referrer" />
+                            </div>
+                            <div>
+                              <span className="text-[9px] font-bold text-rose-600 uppercase tracking-wider">{prod.category}</span>
+                              <h4 className="text-xs font-bold text-slate-900 line-clamp-1 leading-snug cursor-pointer hover:text-rose-600" onClick={() => setSelectedProduct(prod)}>
+                                {prod.name}
+                              </h4>
+                            </div>
+                          </div>
+                          <div className="mt-3 pt-2.5 border-t border-slate-50 flex items-center justify-between gap-1">
+                            <div>
+                              <span className="block text-[8px] text-slate-400 line-through font-mono font-medium">{formattedOriginal}</span>
+                              <span className="text-[11.5px] font-black text-rose-600 font-mono">{formattedPrice}</span>
+                            </div>
+                            <button
+                              onClick={() => handleAddToCart(prod)}
+                              className="px-2.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-[10px] font-black rounded-lg transition-all cursor-pointer"
+                            >
+                              + Beli
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Module 2: Popular Products */}
+                <div className="bg-gradient-to-br from-sky-50/70 to-indigo-50/40 border border-sky-100 rounded-3xl p-6 shadow-xs flex flex-col space-y-4">
+                  <div className="flex items-center justify-between pb-2 border-b border-sky-100/60">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xl">🔥</span>
+                      <div>
+                        <h3 className="text-sm font-black text-slate-900">Produk Terpopuler</h3>
+                        <p className="text-[10px] text-slate-500 font-sans">Aset digital paling banyak dicari & diberi ulasan terbaik</p>
+                      </div>
+                    </div>
+                    <span className="px-2.5 py-1 text-[9px] font-black text-sky-700 bg-sky-100 rounded-full uppercase tracking-wider font-mono">Bestseller</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {[...products].sort((a,b) => b.rating - a.rating || b.reviewsCount - a.reviewsCount).slice(0, 2).map((prod) => {
+                      const formattedPrice = new Intl.NumberFormat('id-ID', {
+                        style: 'currency',
+                        currency: 'IDR',
+                        maximumFractionDigits: 0,
+                      }).format(prod.price);
+                      return (
+                        <div key={prod.id} className="bg-white border border-sky-50 rounded-2xl p-3.5 hover:shadow-md transition-all flex flex-col justify-between h-full group relative">
+                          <span className="absolute top-2.5 right-2.5 px-2 py-0.5 text-[9px] font-black text-slate-800 bg-amber-300 rounded-md flex items-center gap-0.5 z-10">
+                            ★ {prod.rating}
+                          </span>
+                          <div className="space-y-2">
+                            <div className="aspect-video w-full rounded-xl bg-slate-50 overflow-hidden cursor-pointer" onClick={() => setSelectedProduct(prod)}>
+                              <img src={prod.image} alt={prod.name} className="w-full h-full object-cover group-hover:scale-102 transition-transform duration-300" referrerPolicy="no-referrer" />
+                            </div>
+                            <div>
+                              <span className="text-[9px] font-bold text-sky-600 uppercase tracking-wider">{prod.category}</span>
+                              <h4 className="text-xs font-bold text-slate-900 line-clamp-1 leading-snug cursor-pointer hover:text-sky-600" onClick={() => setSelectedProduct(prod)}>
+                                {prod.name}
+                              </h4>
+                            </div>
+                          </div>
+                          <div className="mt-3 pt-2.5 border-t border-slate-50 flex items-center justify-between gap-1">
+                            <div>
+                              <span className="block text-[8px] text-slate-400">({prod.reviewsCount} Ulasan)</span>
+                              <span className="text-[11.5px] font-black text-slate-900 font-mono">{formattedPrice}</span>
+                            </div>
+                            <button
+                              onClick={() => handleAddToCart(prod)}
+                              className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-[10px] font-black rounded-lg transition-all cursor-pointer"
+                            >
+                              + Beli
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
             )}
+
+            {/* Products grid container with layout style configurations and limits */}
+            {(() => {
+              const limitToApply = branding.productsLimit || 6;
+              const displayProducts = showAllProducts || searchQuery !== '' || selectedCategory !== 'Semua'
+                ? sortedProducts
+                : sortedProducts.slice(0, limitToApply);
+              const hasMoreProducts = sortedProducts.length > displayProducts.length;
+
+              return (
+                <div className="space-y-8 mt-6">
+                  {displayProducts.length === 0 ? (
+                    <div className="text-center py-16 bg-white border border-slate-100 rounded-3xl p-8 shadow-xs">
+                      <HelpCircle className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                      <h3 className="text-sm font-bold text-slate-800">Aset tidak ditemukan</h3>
+                      <p className="text-xs text-slate-400 mt-1 max-w-xs mx-auto">
+                        Coba ubah kata kunci pencarian Anda atau kembalikan kategori ke "Semua" untuk menemukan produk terbaik kami.
+                      </p>
+                    </div>
+                  ) : branding.layoutStyle === 'minimal' ? (
+                    // Minimalist Horizontal Row List
+                    <div className="space-y-4">
+                      {displayProducts.map((prod) => (
+                        <div key={prod.id} className="bg-white border border-slate-100 hover:border-slate-300 rounded-2xl p-4 flex flex-col sm:flex-row items-center gap-4 transition-all shadow-xs">
+                          <div className="w-20 h-20 bg-slate-100 rounded-xl overflow-hidden shrink-0">
+                            <img src={prod.image} alt={prod.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                          </div>
+                          <div className="flex-1 text-center sm:text-left">
+                            <div className="flex items-center justify-center sm:justify-start gap-2">
+                              <span className="text-[10px] font-bold text-sky-600 bg-sky-50 px-2 py-0.5 rounded-md uppercase">{prod.category}</span>
+                              <span className="text-xs text-amber-500 font-bold flex items-center gap-0.5">⭐ {prod.rating}</span>
+                            </div>
+                            <h4 className="text-xs font-black text-slate-800 mt-1.5">{prod.name}</h4>
+                            <p className="text-[10px] text-slate-400 mt-0.5 line-clamp-1">{prod.description}</p>
+                          </div>
+                          <div className="text-center sm:text-right shrink-0">
+                            <span className="block text-xs font-black text-rose-600 font-mono">Rp {prod.price.toLocaleString('id-ID')}</span>
+                            <span className="text-[9px] text-slate-400 block mt-0.5">Sisa {prod.licenseKeysPool?.length || 0} Lisensi</span>
+                          </div>
+                          <div className="flex gap-2 w-full sm:w-auto">
+                            <button
+                              onClick={() => setSelectedProduct(prod)}
+                              className="flex-1 sm:flex-none px-3.5 py-2 border border-slate-200 hover:bg-slate-50 text-[11px] font-bold rounded-xl transition-all cursor-pointer"
+                            >
+                              Detail
+                            </button>
+                            <button
+                              onClick={() => handleAddToCart(prod)}
+                              className="flex-1 sm:flex-none px-4 py-2 bg-slate-900 hover:bg-sky-600 text-white text-[11px] font-black rounded-xl transition-all cursor-pointer"
+                            >
+                              + Beli
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : branding.layoutStyle === 'bento' ? (
+                    // Bento Grid Premium
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                      {displayProducts.map((prod, index) => {
+                        const isLarge = index === 0 || index === 4;
+                        return (
+                          <div 
+                            key={prod.id} 
+                            className={`bg-white border border-slate-100 hover:border-slate-200 rounded-3xl overflow-hidden transition-all shadow-xs flex flex-col justify-between group relative ${
+                              isLarge ? 'md:col-span-2 md:row-span-2 p-6' : 'p-4'
+                            }`}
+                          >
+                            <div>
+                              <div className={`relative overflow-hidden rounded-2xl bg-slate-100 mb-4 ${isLarge ? 'h-52' : 'h-36'}`}>
+                                <img 
+                                  src={prod.image} 
+                                  alt={prod.name} 
+                                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" 
+                                  referrerPolicy="no-referrer"
+                                />
+                                <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5">
+                                  <span className="text-[9px] font-black tracking-wider uppercase bg-slate-900/90 text-white px-2 py-0.5 rounded-md backdrop-blur-xs">
+                                    {prod.category}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-1">
+                                  <span className="text-amber-500 text-xs font-bold">★ {prod.rating}</span>
+                                  <span className="text-[9px] text-slate-400 font-medium">({prod.reviewsCount} review)</span>
+                                </div>
+                                <h4 className={`font-black text-slate-950 tracking-tight leading-snug group-hover:text-sky-600 transition-colors ${
+                                  isLarge ? 'text-sm' : 'text-xs'
+                                }`}>
+                                  {prod.name}
+                                </h4>
+                                <p className="text-[10px] text-slate-400 line-clamp-2 leading-relaxed">
+                                  {prod.description}
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+                              <div>
+                                <span className="block text-[8px] font-bold text-slate-400 uppercase tracking-wider">Harga Lisensi</span>
+                                <span className="text-xs font-black text-rose-600 font-mono">Rp {prod.price.toLocaleString('id-ID')}</span>
+                              </div>
+                              <div className="flex gap-1">
+                                <button
+                                  onClick={() => setSelectedProduct(prod)}
+                                  className="p-2 border border-slate-150 hover:bg-slate-50 text-slate-600 hover:text-slate-900 rounded-xl transition-all cursor-pointer"
+                                  title="Detail"
+                                >
+                                  👁️
+                                </button>
+                                <button
+                                  onClick={() => handleAddToCart(prod)}
+                                  className="px-3.5 py-2 bg-slate-900 hover:bg-sky-600 text-white text-[10px] font-black rounded-xl transition-all cursor-pointer"
+                                >
+                                  + Keranjang
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    // Standard Grid Layout (default)
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {displayProducts.map((prod) => (
+                        <ProductCard
+                          key={prod.id}
+                          product={prod}
+                          onViewDetail={(p) => setSelectedProduct(p)}
+                          onAddToCart={(p) => handleAddToCart(p)}
+                          isWishlisted={wishlist.some((item) => item.id === prod.id)}
+                          onToggleWishlist={handleToggleWishlist}
+                        />
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Expansion "Tampilkan Semua" Button */}
+                  {hasMoreProducts && (
+                    <div className="text-center pt-4">
+                      <button
+                        onClick={() => setShowAllProducts(true)}
+                        className="px-6 py-3 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-bold text-xs rounded-2xl shadow-xs transition-all hover:scale-102 cursor-pointer active:scale-98"
+                      >
+                        Tampilkan Semua Produk ({sortedProducts.length - displayProducts.length} Lainnya) ↓
+                      </button>
+                    </div>
+                  )}
+
+                  {showAllProducts && searchQuery === '' && selectedCategory === 'Semua' && (
+                    <div className="text-center pt-4">
+                      <button
+                        onClick={() => setShowAllProducts(false)}
+                        className="px-6 py-3 bg-white hover:bg-slate-50 border border-slate-200 text-slate-500 font-bold text-xs rounded-2xl shadow-xs transition-all hover:scale-102 cursor-pointer active:scale-98"
+                      >
+                        Sembunyikan Sebagian ↑
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         )}
 
@@ -1803,6 +2326,9 @@ export default function App() {
               onPurgeTransactions={handlePurgeTransactions}
               promoCodes={promoCodes}
               onUpdatePromoCodes={setPromoCodes}
+              isAutosyncEnabled={isAutosyncEnabled}
+              setIsAutosyncEnabled={setIsAutosyncEnabled}
+              lastAutosyncTime={lastAutosyncTime}
             />
           )
         )}
@@ -1866,12 +2392,51 @@ export default function App() {
       )}
 
       {/* Footer credits and information with Complaint Menu */}
-      <footer className="bg-white border-t border-slate-100 py-10 px-6 text-center mt-12 shrink-0">
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-6 text-xs text-slate-400">
-          <div className="text-left space-y-1">
-            <p className="font-bold text-slate-700">© 2026 {branding.name}. Hak Cipta Dilindungi.</p>
-            <p className="text-[10px] text-slate-400">{branding.slogan}</p>
+      <footer className="bg-white border-t border-slate-100 py-10 px-6 mt-12 shrink-0">
+        <div className="max-w-7xl mx-auto space-y-8">
+          {/* Powered by partnership block */}
+          <div className="flex flex-col md:flex-row items-center justify-between gap-4 pb-6 border-b border-slate-100">
+            <span className="text-[10px] uppercase tracking-widest font-black text-slate-400">Powered by & Partner Resmi:</span>
+            <div className="flex flex-wrap items-center gap-5 sm:gap-7 justify-center">
+              {/* Microsoft */}
+              <div className="flex items-center gap-2 grayscale hover:grayscale-0 opacity-60 hover:opacity-100 transition-all cursor-default">
+                <div className="grid grid-cols-2 gap-0.5 w-4 h-4">
+                  <div className="bg-[#f25022] w-1.5 h-1.5"></div>
+                  <div className="bg-[#7fba00] w-1.5 h-1.5"></div>
+                  <div className="bg-[#00a4ef] w-1.5 h-1.5"></div>
+                  <div className="bg-[#ffb900] w-1.5 h-1.5"></div>
+                </div>
+                <span className="text-xs font-extrabold text-slate-700 tracking-tight">Microsoft</span>
+              </div>
+              {/* Canva */}
+              <div className="flex items-center gap-2 grayscale hover:grayscale-0 opacity-60 hover:opacity-100 transition-all cursor-default">
+                <div className="w-4.5 h-4.5 rounded-full bg-gradient-to-tr from-[#00c4cc] to-[#7d2ae8] flex items-center justify-center shadow-xs">
+                  <span className="text-[9px] font-black text-white leading-none font-sans">C</span>
+                </div>
+                <span className="text-xs font-extrabold text-slate-700 tracking-tight">Canva</span>
+              </div>
+              {/* Adobe */}
+              <div className="flex items-center gap-2 grayscale hover:grayscale-0 opacity-60 hover:opacity-100 transition-all cursor-default">
+                <div className="w-4 h-4 bg-[#FF0000] rounded-xs flex items-center justify-center font-sans font-black text-white text-[10px] leading-none">
+                  A
+                </div>
+                <span className="text-xs font-extrabold text-slate-700 tracking-tight">Adobe</span>
+              </div>
+              {/* Autodesk */}
+              <div className="flex items-center gap-2 grayscale hover:grayscale-0 opacity-60 hover:opacity-100 transition-all cursor-default">
+                <div className="w-4 h-4 bg-[#0696D7] rounded-xs flex items-center justify-center font-sans font-extrabold text-white text-[9px] leading-none">
+                  A
+                </div>
+                <span className="text-xs font-extrabold text-slate-700 tracking-tight">Autodesk</span>
+              </div>
+            </div>
           </div>
+
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-6 text-xs text-slate-400">
+            <div className="text-left space-y-1">
+              <p className="font-bold text-slate-700">© 2026 {branding.name}. Hak Cipta Dilindungi.</p>
+              <p className="text-[10px] text-slate-400">{branding.slogan}</p>
+            </div>
           
           <div className="flex flex-wrap items-center justify-center gap-4 sm:gap-6">
             <button
@@ -1889,7 +2454,176 @@ export default function App() {
             <span className="text-slate-500 font-medium">Instan delivery & encrypted activation keys</span>
           </div>
         </div>
+      </div>
       </footer>
+
+      {/* 5. Pojok Silaturahmi Floating Widget */}
+      <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end">
+        {/* Chat Box Panel */}
+        {isChatOpen && (
+          <div className="bg-white border border-slate-100 rounded-3xl shadow-xl w-80 md:w-96 max-h-[500px] flex flex-col overflow-hidden mb-3 animate-in slide-in-from-bottom-5 fade-in duration-300">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-sky-600 to-indigo-600 p-4 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">🤝</span>
+                <div>
+                  <h3 className="text-xs font-black">Pojok Silaturahmi</h3>
+                  <p className="text-[9px] text-sky-100 font-sans">Saling sapa antar pengunjung & pembeli</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsChatOpen(false)}
+                className="text-white hover:text-sky-200 transition-colors p-1 bg-white/10 hover:bg-white/20 rounded-lg cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Message List */}
+            <div className="flex-1 p-4 overflow-y-auto space-y-3 bg-slate-50/50 max-h-[250px] min-h-[180px]">
+              {silaturahmiMessages.map((msg) => {
+                const dateObj = new Date(msg.timestamp);
+                const timeStr = isNaN(dateObj.getTime()) ? '' : dateObj.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+                
+                // Peran styles
+                const isCreator = msg.role === 'Creator' || msg.role?.toLowerCase().includes('admin') || msg.role?.toLowerCase().includes('owner') || msg.role === 'Kreator';
+                const isBuyer = msg.role === 'Pembeli';
+                const roleBadge = isCreator
+                  ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                  : isBuyer
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                    : 'bg-slate-50 text-slate-600 border-slate-200';
+
+                return (
+                  <div key={msg.id} className="flex gap-2.5 items-start animate-in fade-in duration-200">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-black text-xs shrink-0 ${msg.avatarColor || 'bg-slate-200 text-slate-700'}`}>
+                      {msg.name ? msg.name.charAt(0).toUpperCase() : '?' }
+                    </div>
+                    <div className="flex-1 min-w-0 bg-white p-2.5 rounded-2xl border border-slate-100 shadow-3xs">
+                      <div className="flex items-center justify-between gap-2 flex-wrap mb-1">
+                        <span className="text-[10.5px] font-bold text-slate-800 truncate">{msg.name}</span>
+                        <span className="text-[8px] font-medium font-mono text-slate-400">{timeStr}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 mb-1.5">
+                        <span className={`px-1.5 py-0.2 text-[7px] font-black uppercase rounded-sm border ${roleBadge}`}>
+                          {msg.role || 'Tamu'}
+                        </span>
+                      </div>
+                      <p className="text-[10.5px] text-slate-600 font-sans leading-relaxed break-words">{msg.message}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Form Input */}
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (!chatName.trim() || !chatMessage.trim()) return;
+                setIsSubmittingChat(true);
+
+                // Avatar colors bank
+                const colors = [
+                  'bg-indigo-500 text-white',
+                  'bg-emerald-500 text-white',
+                  'bg-rose-500 text-white',
+                  'bg-sky-500 text-white',
+                  'bg-amber-500 text-white',
+                  'bg-purple-500 text-white',
+                  'bg-teal-500 text-white'
+                ];
+                
+                const newMessage: SilaturahmiMessage = {
+                  id: `msg-${Date.now()}`,
+                  name: chatName.trim(),
+                  message: chatMessage.trim(),
+                  timestamp: new Date().toISOString(),
+                  avatarColor: colors[Math.floor(Math.random() * colors.length)],
+                  role: chatRole,
+                };
+
+                try {
+                  // Write to Firestore and local state
+                  await syncToFirebase('silaturahmi', newMessage.id, newMessage);
+                  setSilaturahmiMessages(prev => [...prev, newMessage]);
+                  setChatMessage('');
+                  
+                  // Log event
+                  addSystemLog('system', 'Silaturahmi Baru', `${chatName} mengirim pesan silaturahmi.`);
+                } catch (err) {
+                  console.error('Failed to sync silaturahmi:', err);
+                  // Fallback local only
+                  setSilaturahmiMessages(prev => [...prev, newMessage]);
+                  setChatMessage('');
+                } finally {
+                  setIsSubmittingChat(false);
+                }
+              }}
+              className="p-3.5 border-t border-slate-150 bg-white space-y-2.5"
+            >
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[8px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Nama Anda</label>
+                  <input
+                    type="text"
+                    placeholder="Hamba Allah"
+                    value={chatName}
+                    onChange={(e) => setChatName(e.target.value)}
+                    maxLength={20}
+                    required
+                    className="w-full text-[10px] px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:outline-hidden"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[8px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Status Peran</label>
+                  <select
+                    value={chatRole}
+                    onChange={(e) => setChatRole(e.target.value)}
+                    className="w-full text-[10px] px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:outline-hidden"
+                  >
+                    <option value="Tamu">Tamu 👤</option>
+                    <option value="Pembeli">Pembeli 🛍️</option>
+                    <option value="Kreator">Kreator 🎨</option>
+                    <option value="Developer">Developer 💻</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-[8px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Pesan Silaturahmi</label>
+                <textarea
+                  placeholder="Tulis salam hangat Anda..."
+                  value={chatMessage}
+                  onChange={(e) => setChatMessage(e.target.value)}
+                  maxLength={120}
+                  required
+                  rows={2}
+                  className="w-full text-[10px] px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:outline-hidden resize-none"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={isSubmittingChat}
+                className="w-full py-1.5 bg-sky-600 hover:bg-sky-700 disabled:bg-slate-300 text-white text-[10px] font-black rounded-lg transition-colors cursor-pointer flex items-center justify-center gap-1 shadow-2xs"
+              >
+                {isSubmittingChat ? 'Mengirim...' : 'Kirim Sapaan Silaturahmi ✨'}
+              </button>
+            </form>
+          </div>
+        )}
+
+        {/* Toggle Button */}
+        <button
+          onClick={() => setIsChatOpen(!isChatOpen)}
+          className="bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-700 hover:to-indigo-700 text-white font-black text-xs px-4 py-3 rounded-full shadow-lg hover:shadow-xl transition-all hover:scale-105 active:scale-95 cursor-pointer flex items-center gap-1.5 relative"
+        >
+          <span className="text-sm">💬</span>
+          <span>Pojok Silaturahmi</span>
+          {!isChatOpen && (
+            <span className="absolute -top-1 -right-1 w-3 h-3 bg-rose-500 rounded-full border-2 border-white animate-ping"></span>
+          )}
+        </button>
+      </div>
     </div>
   );
 }
