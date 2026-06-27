@@ -824,3 +824,5 @@ async function startServer() {
 }
 
 startServer();
+// Ekspor app agar bisa dibaca oleh serverless Vercel
+export default app;
