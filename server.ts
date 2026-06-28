@@ -234,6 +234,18 @@ app.post("/api/send-email", async (req, res) => {
     console.error("Gagal mengirim email:", err);
     const errorMessage = err?.message || String(err);
     
+    if (activeEmailService === "brevo" && (errorMessage.includes("unrecognised IP address") || errorMessage.includes("authorised_ips") || errorMessage.includes("unauthorized"))) {
+      return res.status(500).json({
+        success: false,
+        error: `⚠️ Masalah Keamanan IP Brevo (Error 401: Unrecognised IP Address)\n\n` +
+               `Detail: Brevo menolak pengiriman karena server Cloud Run ini menggunakan alamat IP dinamis yang belum terdaftar di daftar 'Authorized IPs' akun Brevo Anda.\n\n` +
+               `Langkah Penyelesaian:\n` +
+               `1. Silakan buka akun Brevo Anda di browser.\n` +
+               `2. Buka halaman Keamanan Authorized IPs di link berikut: https://app.brevo.com/security/authorised_ips\n` +
+               `3. Hapus semua IP yang terdaftar di daftar 'Authorized IPs' (atau matikan fitur pembatasan IP) agar API Key Brevo Anda dapat digunakan dari alamat IP server cloud dinamis seperti Google Cloud Run.`
+      });
+    }
+    
     if (activeEmailService === "smtp" && !usingCustomSMTP && (errorMessage.includes("535") || errorMessage.toLowerCase().includes("username and password not accepted"))) {
       return res.status(500).json({
         success: false,
@@ -464,7 +476,19 @@ app.post("/api/send-admin-notification", async (req, res) => {
     return res.status(200).json({ success: true, message: `Email notifikasi pesanan dikirim ke Admin ${adminEmail} (via ${activeEmailService.toUpperCase()})` });
   } catch (err: any) {
     console.error("Gagal mengirim email notifikasi ke admin:", err);
-    return res.status(500).json({ success: false, error: err?.message || String(err) });
+    const errorMessage = err?.message || String(err);
+    if (activeEmailService === "brevo" && (errorMessage.includes("unrecognised IP address") || errorMessage.includes("authorised_ips") || errorMessage.includes("unauthorized"))) {
+      return res.status(500).json({
+        success: false,
+        error: `⚠️ Masalah Keamanan IP Brevo (Error 401: Unrecognised IP Address) - Notifikasi Admin\n\n` +
+               `Detail: Brevo menolak pengiriman karena server Cloud Run ini menggunakan alamat IP dinamis yang belum terdaftar di daftar 'Authorized IPs' akun Brevo Anda.\n\n` +
+               `Langkah Penyelesaian:\n` +
+               `1. Silakan buka akun Brevo Anda di browser.\n` +
+               `2. Buka halaman Keamanan Authorized IPs di link berikut: https://app.brevo.com/security/authorised_ips\n` +
+               `3. Hapus semua IP yang terdaftar di daftar 'Authorized IPs' (atau matikan fitur pembatasan IP) agar API Key Brevo Anda dapat digunakan dari alamat IP server cloud dinamis seperti Google Cloud Run.`
+      });
+    }
+    return res.status(500).json({ success: false, error: errorMessage });
   }
 });
 

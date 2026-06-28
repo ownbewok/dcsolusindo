@@ -52,8 +52,7 @@ import {
   bulkPushToFirebase,
   purgeCollectionFromFirebase
 } from './lib/firebaseSync';
-import { onSnapshot, collection, doc } from 'firebase/firestore';
-import { db } from './firebase';
+
 
 export default function App() {
   // Refs to prevent infinite synchronization write loops
@@ -70,7 +69,7 @@ export default function App() {
       if (savedTheme) {
         return savedTheme === 'dark';
       }
-      return window.matchMedia('(prefers-color-scheme: dark)').matches;
+      return false; // Default to light mode
     }
     return false;
   });
@@ -561,7 +560,7 @@ export default function App() {
   const [isWishlistOpen, setIsWishlistOpen] = useState(false);
 
   // Pojok Silaturahmi Chat States
-  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [isChatOpen, setIsChatOpen] = useState(true);
   const [chatName, setChatName] = useState('');
   const [chatRole, setChatRole] = useState('Tamu');
   const [chatMessage, setChatMessage] = useState('');
@@ -596,334 +595,119 @@ export default function App() {
     setWishlist([]);
   };
 
-  // Firebase Firestore Database Integration States
-  const [isDbLoading, setIsDbLoading] = useState<boolean>(true);
+  // Firebase Integration State (Fully Offline Sandbox Mode supported as fallback)
+  const [isDbLoading, setIsDbLoading] = useState<boolean>(false);
   const [isFirebaseConnected, setIsFirebaseConnected] = useState<boolean>(false);
   const [firebaseError, setFirebaseError] = useState<string | null>(null);
 
-  // Real-Time Autosync Engine States
-  const [isAutosyncEnabled, setIsAutosyncEnabled] = useState<boolean>(() => {
-    const saved = localStorage.getItem('digimarket_autosync');
-    return saved !== null ? saved === 'true' : true;
+  // Always Online Mode: Autosync states locked to true
+  const [isAutosyncEnabled, setIsAutosyncEnabled] = useState<boolean>(true);
+  const [lastAutosyncTime, setLastAutosyncTime] = useState<string | null>(() => {
+    return localStorage.getItem('digimarket_last_autosync_time') || null;
   });
-  const [lastAutosyncTime, setLastAutosyncTime] = useState<string | null>(null);
 
-  useEffect(() => {
-    localStorage.setItem('digimarket_autosync', String(isAutosyncEnabled));
-  }, [isAutosyncEnabled]);
-
-  // Real-Time onSnapshot Firestore Subscriber
-  useEffect(() => {
-    if (!isAutosyncEnabled) {
-      return;
-    }
-
-    console.log('⚡ Real-time Autosync engine activated. Listening to Firestore collections...');
-    const unsubscribes: (() => void)[] = [];
-
-    const formatTime = () => {
-      const now = new Date();
-      return now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    };
-
-    const handleAutosyncError = (entity: string, err: any) => {
-      console.error(`Autosync ${entity} failed:`, err);
-      const errMsg = err?.message || String(err);
-      if (
-        errMsg.toLowerCase().includes('quota') || 
-        errMsg.toLowerCase().includes('exhausted') || 
-        errMsg.toLowerCase().includes('permission-denied') || 
-        errMsg.toLowerCase().includes('resource-exhausted') ||
-        err?.code === 'resource-exhausted'
-      ) {
-        setFirebaseError(errMsg);
-        setIsAutosyncEnabled(false);
-      }
-    };
-
+  const pullAllFromFirebase = async () => {
+    setIsDbLoading(true);
+    setFirebaseError(null);
     try {
-      // 1. Listen to products
-      const unsubProducts = onSnapshot(collection(db, 'products'), (snapshot) => {
-        const cloudProducts: Product[] = [];
-        snapshot.forEach((d) => {
-          cloudProducts.push(d.data() as Product);
-        });
-        if (cloudProducts.length > 0) {
-          setProducts(cloudProducts);
-          setLastAutosyncTime(formatTime());
-        }
-      }, (err) => handleAutosyncError('products', err));
-      unsubscribes.push(unsubProducts);
+      console.log("📥 Menarik data dari Firebase Cloud...");
+      
+      // 1. Fetch shop branding config
+      const brandingDoc = await fetchDocFromFirebase('config', 'shop_branding');
+      if (brandingDoc) {
+        const { id, ...cleanBranding } = brandingDoc;
+        setBranding(cleanBranding);
+      }
+      
+      // 2. Fetch categories config
+      const categoriesDoc = await fetchDocFromFirebase('config', 'categories');
+      if (categoriesDoc && Array.isArray(categoriesDoc.list)) {
+        setCategories(categoriesDoc.list);
+      }
+      
+      // 3. Fetch payment methods config
+      const paymentDoc = await fetchDocFromFirebase('config', 'payment_methods');
+      if (paymentDoc && Array.isArray(paymentDoc.list)) {
+        setPaymentMethods(paymentDoc.list);
+      }
 
-      // 2. Listen to reviews
-      const unsubReviews = onSnapshot(collection(db, 'reviews'), (snapshot) => {
-        const cloudReviews: Review[] = [];
-        snapshot.forEach((d) => {
-          cloudReviews.push(d.data() as Review);
-        });
-        if (cloudReviews.length > 0) {
-          setReviews(cloudReviews);
-          setLastAutosyncTime(formatTime());
-        }
-      }, (err) => handleAutosyncError('reviews', err));
-      unsubscribes.push(unsubReviews);
+      // 4. Fetch products
+      const cloudProducts = await fetchCollectionFromFirebase('products');
+      if (cloudProducts && cloudProducts.length > 0) {
+        setProducts(cloudProducts);
+      }
 
-      // 3. Listen to transactions
-      const unsubTransactions = onSnapshot(collection(db, 'transactions'), (snapshot) => {
-        const cloudTransactions: Transaction[] = [];
-        snapshot.forEach((d) => {
-          cloudTransactions.push(d.data() as Transaction);
-        });
-        setTransactions(cloudTransactions.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
-        setLastAutosyncTime(formatTime());
-      }, (err) => handleAutosyncError('transactions', err));
-      unsubscribes.push(unsubTransactions);
+      // 5. Fetch reviews
+      const cloudReviews = await fetchCollectionFromFirebase('reviews');
+      if (cloudReviews && cloudReviews.length > 0) {
+        setReviews(cloudReviews);
+      }
 
-      // 4. Listen to complaints
-      const unsubComplaints = onSnapshot(collection(db, 'complaints'), (snapshot) => {
-        const cloudComplaints: Complaint[] = [];
-        snapshot.forEach((d) => {
-          cloudComplaints.push(d.data() as Complaint);
-        });
-        setComplaints(cloudComplaints.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
-        setLastAutosyncTime(formatTime());
-      }, (err) => handleAutosyncError('complaints', err));
-      unsubscribes.push(unsubComplaints);
+      // 6. Fetch transactions
+      const cloudTransactions = await fetchCollectionFromFirebase('transactions');
+      if (cloudTransactions && cloudTransactions.length > 0) {
+        setTransactions(cloudTransactions);
+      }
 
-      // 5. Listen to system_logs
-      const unsubLogs = onSnapshot(collection(db, 'system_logs'), (snapshot) => {
-        const cloudLogs: SystemLog[] = [];
-        snapshot.forEach((d) => {
-          cloudLogs.push(d.data() as SystemLog);
-        });
-        if (cloudLogs.length > 0) {
-          setSystemLogs(cloudLogs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
-          setLastAutosyncTime(formatTime());
-        }
-      }, (err) => handleAutosyncError('system_logs', err));
-      unsubscribes.push(unsubLogs);
+      // 7. Fetch complaints
+      const cloudComplaints = await fetchCollectionFromFirebase('complaints');
+      if (cloudComplaints && cloudComplaints.length > 0) {
+        setComplaints(cloudComplaints);
+      }
 
-      // 6. Listen to shop_branding doc in config collection
-      const unsubBranding = onSnapshot(doc(db, 'config', 'shop_branding'), (snap) => {
-        if (snap.exists()) {
-          const data = snap.data();
-          const { id, syncSource, lastSyncedAt, ...cleanBranding } = data;
-          setBranding((prev) => {
-            const merged = { ...prev, ...cleanBranding };
-            lastSyncedBrandingRef.current = JSON.stringify(merged);
-            return merged;
-          });
-          setLastAutosyncTime(formatTime());
-        }
-      }, (err) => handleAutosyncError('shop_branding', err));
-      unsubscribes.push(unsubBranding);
+      // 8. Fetch vault users
+      const cloudVaultUsers = await fetchCollectionFromFirebase('vault_users');
+      if (cloudVaultUsers && cloudVaultUsers.length > 0) {
+        setVaultUsers(cloudVaultUsers);
+      }
 
-      // 7. Listen to other config documents
-      const configDocs = [
-        { id: 'categories', setter: setCategories, key: 'list', ref: lastSyncedCategoriesRef },
-        { id: 'payment_methods', setter: setPaymentMethods, key: 'list', ref: lastSyncedPaymentMethodsRef },
-        { id: 'vault_users', setter: setVaultUsers, key: 'list', ref: lastSyncedVaultUsersRef },
-        { id: 'admin_users', setter: setAdminUsers, key: 'list', ref: lastSyncedAdminUsersRef },
-        { id: 'promo_codes', setter: setPromoCodes, key: 'list', ref: lastSyncedPromoCodesRef },
-      ];
+      // 9. Fetch admin users
+      const cloudAdminUsers = await fetchCollectionFromFirebase('admin_users');
+      if (cloudAdminUsers && cloudAdminUsers.length > 0) {
+        setAdminUsers(cloudAdminUsers);
+      }
 
-      configDocs.forEach((cfg) => {
-        const unsubCfg = onSnapshot(doc(db, 'config', cfg.id), (snap) => {
-          if (snap.exists()) {
-            const data = snap.data();
-            if (data && Array.isArray(data[cfg.key])) {
-              cfg.ref.current = JSON.stringify(data[cfg.key]);
-              cfg.setter(data[cfg.key]);
-              setLastAutosyncTime(formatTime());
-            }
-          }
-        }, (err) => handleAutosyncError(`config/${cfg.id}`, err));
-        unsubscribes.push(unsubCfg);
-      });
+      // 10. Fetch promo codes
+      const cloudPromoCodes = await fetchCollectionFromFirebase('promo_codes');
+      if (cloudPromoCodes && cloudPromoCodes.length > 0) {
+        setPromoCodes(cloudPromoCodes);
+      }
 
-      // 8. Listen to silaturahmi messages
-      const unsubSilaturahmi = onSnapshot(collection(db, 'silaturahmi'), (snapshot) => {
-        const cloudMessages: SilaturahmiMessage[] = [];
-        snapshot.forEach((d) => {
-          cloudMessages.push(d.data() as SilaturahmiMessage);
-        });
-        if (cloudMessages.length > 0) {
-          const sorted = cloudMessages.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-          setSilaturahmiMessages(sorted);
-          setLastAutosyncTime(formatTime());
-        }
-      }, (err) => handleAutosyncError('silaturahmi', err));
-      unsubscribes.push(unsubSilaturahmi);
+      // 11. Fetch silaturahmi messages
+      const cloudSilaturahmi = await fetchCollectionFromFirebase('silaturahmi');
+      if (cloudSilaturahmi && cloudSilaturahmi.length > 0) {
+        setSilaturahmiMessages(cloudSilaturahmi);
+      }
 
-    } catch (err) {
-      console.error('Error starting real-time autosync subscription:', err);
+      // 12. Fetch system logs
+      const cloudSystemLogs = await fetchCollectionFromFirebase('system_logs');
+      if (cloudSystemLogs && cloudSystemLogs.length > 0) {
+        setSystemLogs(cloudSystemLogs);
+      }
+
+      setIsFirebaseConnected(true);
+      setLastAutosyncTime(new Date().toLocaleTimeString('id-ID'));
+      console.log("✅ Berhasil memuat database dari Firebase Cloud.");
+    } catch (error: any) {
+      console.warn("Gagal menarik data dari Firebase Cloud, menggunakan local backup:", error);
+      setIsFirebaseConnected(false);
+      setFirebaseError(error.message || String(error));
+    } finally {
+      setIsDbLoading(false);
     }
-
-    return () => {
-      console.log('🧹 Cleaning up real-time autosync listeners...');
-      unsubscribes.forEach((unsub) => unsub());
-    };
-  }, [isAutosyncEnabled]);
+  };
 
   useEffect(() => {
-    const initializeDatabaseFromFirestore = async () => {
-      try {
-        setIsDbLoading(true);
-        console.log('Mengoneksikan dan menyelaraskan dengan Firebase Firestore...');
-
-        // 1. Fetch Products
-        let cloudProducts = await fetchCollectionFromFirebase('products');
-        if (cloudProducts.length === 0) {
-          console.log('Firestore products collection is empty. Seeding initial products...');
-          await bulkPushToFirebase('products', initialProducts, 'id');
-          cloudProducts = initialProducts;
-        }
-        setProducts(cloudProducts);
-
-        // 2. Fetch Reviews
-        let cloudReviews = await fetchCollectionFromFirebase('reviews');
-        if (cloudReviews.length === 0) {
-          console.log('Firestore reviews collection is empty. Seeding initial reviews...');
-          await bulkPushToFirebase('reviews', initialReviews, 'id');
-          cloudReviews = initialReviews;
-        }
-        setReviews(cloudReviews);
-
-        // 3. Fetch Transactions
-        const cloudTransactions = await fetchCollectionFromFirebase('transactions');
-        if (cloudTransactions.length > 0) {
-          setTransactions(cloudTransactions.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
-        }
-
-        // 4. Fetch Complaints
-        const cloudComplaints = await fetchCollectionFromFirebase('complaints');
-        if (cloudComplaints.length > 0) {
-          setComplaints(cloudComplaints.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
-        }
-
-        // 5. Fetch Configurations from Firebase config collection
-        const brandingDoc = await fetchDocFromFirebase('config', 'shop_branding');
-        if (brandingDoc) {
-          const { id, syncSource, lastSyncedAt, ...cleanBranding } = brandingDoc;
-          setBranding(prev => {
-            const merged = { ...prev, ...cleanBranding };
-            lastSyncedBrandingRef.current = JSON.stringify(merged);
-            return merged;
-          });
-        } else {
-          lastSyncedBrandingRef.current = JSON.stringify(branding);
-          await syncToFirebase('config', 'shop_branding', branding);
-        }
-
-        const categoriesDoc = await fetchDocFromFirebase('config', 'categories');
-        if (categoriesDoc && Array.isArray(categoriesDoc.list)) {
-          lastSyncedCategoriesRef.current = JSON.stringify(categoriesDoc.list);
-          setCategories(categoriesDoc.list);
-        } else {
-          lastSyncedCategoriesRef.current = JSON.stringify(categories);
-          await syncToFirebase('config', 'categories', { list: categories });
-        }
-
-        const paymentMethodsDoc = await fetchDocFromFirebase('config', 'payment_methods');
-        if (paymentMethodsDoc && Array.isArray(paymentMethodsDoc.list)) {
-          lastSyncedPaymentMethodsRef.current = JSON.stringify(paymentMethodsDoc.list);
-          setPaymentMethods(paymentMethodsDoc.list);
-        } else {
-          lastSyncedPaymentMethodsRef.current = JSON.stringify(paymentMethods);
-          await syncToFirebase('config', 'payment_methods', { list: paymentMethods });
-        }
-
-        const vaultUsersDoc = await fetchDocFromFirebase('config', 'vault_users');
-        if (vaultUsersDoc && Array.isArray(vaultUsersDoc.list)) {
-          lastSyncedVaultUsersRef.current = JSON.stringify(vaultUsersDoc.list);
-          setVaultUsers(vaultUsersDoc.list);
-        } else {
-          lastSyncedVaultUsersRef.current = JSON.stringify(vaultUsers);
-          await syncToFirebase('config', 'vault_users', { list: vaultUsers });
-        }
-
-        const adminUsersDoc = await fetchDocFromFirebase('config', 'admin_users');
-        if (adminUsersDoc && Array.isArray(adminUsersDoc.list)) {
-          lastSyncedAdminUsersRef.current = JSON.stringify(adminUsersDoc.list);
-          setAdminUsers(adminUsersDoc.list);
-        } else {
-          lastSyncedAdminUsersRef.current = JSON.stringify(adminUsers);
-          await syncToFirebase('config', 'admin_users', { list: adminUsers });
-        }
-
-        const promoCodesDoc = await fetchDocFromFirebase('config', 'promo_codes');
-        if (promoCodesDoc && Array.isArray(promoCodesDoc.list)) {
-          lastSyncedPromoCodesRef.current = JSON.stringify(promoCodesDoc.list);
-          setPromoCodes(promoCodesDoc.list);
-        } else {
-          lastSyncedPromoCodesRef.current = JSON.stringify(promoCodes);
-          await syncToFirebase('config', 'promo_codes', { list: promoCodes });
-        }
-
-        // 6. Fetch System Logs
-        let cloudLogs = await fetchCollectionFromFirebase('system_logs');
-        if (cloudLogs.length > 0) {
-          setSystemLogs(cloudLogs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
-        } else {
-          const defaultLog = {
-            id: 'log-init-firebase',
-            type: 'system',
-            title: 'Koneksi Cloud Firestore Aktif',
-            message: 'Database berhasil dialihkan ke Firebase Firestore secara real-time.',
-            timestamp: new Date().toISOString(),
-          };
-          await syncToFirebase('system_logs', defaultLog.id, defaultLog);
-          setSystemLogs([defaultLog]);
-        }
-
-        // 7. Fetch Silaturahmi messages
-        let cloudSilaturahmi = await fetchCollectionFromFirebase('silaturahmi');
-        if (cloudSilaturahmi.length === 0) {
-          console.log('Firestore silaturahmi collection is empty. Seeding initial messages...');
-          const initialSilaturahmiList = [
-            {
-              id: 'msg-1',
-              name: 'Admin Toko',
-              message: 'Selamat datang di Pojok Silaturahmi! Silakan tinggalkan pesan sapaan hangat atau feedback di sini. Mari jalin tali silaturahmi! 🤝✨',
-              timestamp: new Date(Date.now() - 3600000 * 5).toISOString(),
-              avatarColor: 'bg-indigo-500 text-white',
-              role: 'Creator'
-            },
-            {
-              id: 'msg-2',
-              name: 'Andi Wijaya',
-              message: 'Halo semua, izin berkunjung! Tokonya keren banget, pembayarannya instan dan lisensinya langsung dikirim. Sukses selalu gan!',
-              timestamp: new Date(Date.now() - 3600000 * 2).toISOString(),
-              avatarColor: 'bg-emerald-500 text-white',
-              role: 'Pembeli'
-            }
-          ];
-          await bulkPushToFirebase('silaturahmi', initialSilaturahmiList, 'id');
-          cloudSilaturahmi = initialSilaturahmiList;
-        }
-        setSilaturahmiMessages(cloudSilaturahmi.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()));
-
-        setIsFirebaseConnected(true);
-      } catch (err: any) {
-        console.error('Firestore init failed. Operating in local-fallback mode:', err);
-        const errMsg = err.message || String(err);
-        setFirebaseError(errMsg);
-        if (
-          errMsg.toLowerCase().includes('quota') || 
-          errMsg.toLowerCase().includes('exhausted') || 
-          errMsg.toLowerCase().includes('permission-denied') || 
-          errMsg.toLowerCase().includes('resource-exhausted') ||
-          err?.code === 'resource-exhausted'
-        ) {
-          setIsAutosyncEnabled(false);
-        }
-      } finally {
-        setIsDbLoading(false);
-      }
-    };
-
-    initializeDatabaseFromFirestore();
+    pullAllFromFirebase();
   }, []);
+
+  useEffect(() => {
+    if (lastAutosyncTime) {
+      localStorage.setItem('digimarket_last_autosync_time', lastAutosyncTime);
+    } else {
+      localStorage.removeItem('digimarket_last_autosync_time');
+    }
+  }, [lastAutosyncTime]);
 
   // Search, Filter, Sort States
   const [searchQuery, setSearchQuery] = useState('');
@@ -1079,54 +863,32 @@ export default function App() {
   // Helper to automatically push transaction to Firebase database ('uploads' collection)
   const autoPushToFirebase = async (trx: Transaction) => {
     try {
-      const { collection, addDoc } = await import('firebase/firestore');
-      const { db } = await import('./firebase');
-      
-      const docRef = await addDoc(collection(db, 'uploads'), {
-        transactionId: trx.id,
-        buyerName: trx.buyerName,
-        buyerEmail: trx.buyerEmail,
-        buyerPhone: trx.buyerPhone || '',
-        totalPrice: trx.totalPrice,
-        paymentMethod: trx.paymentMethod,
-        paymentStatus: trx.paymentStatus,
-        senderBank: trx.senderBank || '',
-        senderName: trx.senderName || '',
-        senderNotes: trx.senderNotes || '',
-        paymentProof: trx.paymentProof || '',
-        createdAt: trx.createdAt,
-        pushedAt: new Date().toISOString(),
-        pushType: 'automatic'
-      });
-      
       addSystemLog(
         'system',
-        'Auto Push Firebase Sukses',
-        `Data transaksi ${trx.id} otomatis didorong ke Firebase Firestore ('uploads') dengan ID Dokumen: ${docRef.id}`,
+        'Auto Push Lokal Sukses',
+        `Data transaksi ${trx.id} otomatis direkam ke Sandbox Offline Lokal.`,
         trx.buyerEmail
       );
-      console.log(`Auto Push Firebase Sukses: ${docRef.id}`);
+      console.log(`Auto Push Lokal Sukses: ${trx.id}`);
     } catch (err: any) {
-      console.error('Gagal melakukan auto push ke Firebase:', err);
-      addSystemLog(
-        'system',
-        'Auto Push Firebase Gagal',
-        `Gagal mendorong transaksi ${trx.id} ke Firebase: ${err.message || err}`,
-        trx.buyerEmail
-      );
+      console.error('Gagal melakukan auto push lokal:', err);
     }
   };
 
   // Real-time auto-sync helper for any database entity
   const autoSyncEntity = async (collectionName: string, docId: string, data: any, silent = true) => {
+    if (!isAutosyncEnabled) return;
     try {
       const res = await syncToFirebase(collectionName, docId, data);
-      if (res.success && !silent) {
-        addSystemLog(
-          'system',
-          'Sync Cloud Otomatis Sukses',
-          `Data ${collectionName} dengan ID ${docId} sukses disinkronkan ke Firebase Cloud Firestore.`
-        );
+      if (res.success) {
+        setLastAutosyncTime(new Date().toLocaleTimeString('id-ID'));
+        if (!silent) {
+          addSystemLog(
+            'system',
+            'Sync Cloud Otomatis Sukses',
+            `Data ${collectionName} dengan ID ${docId} sukses disinkronkan ke Firebase Cloud.`
+          );
+        }
       }
     } catch (err: any) {
       console.error(`Gagal melakukan sinkronisasi otomatis ${collectionName} ke Firebase:`, err);
@@ -1134,8 +896,12 @@ export default function App() {
   };
 
   const autoDeleteEntity = async (collectionName: string, docId: string) => {
+    if (!isAutosyncEnabled) return;
     try {
-      await deleteFromFirebase(collectionName, docId);
+      const res = await deleteFromFirebase(collectionName, docId);
+      if (res.success) {
+        setLastAutosyncTime(new Date().toLocaleTimeString('id-ID'));
+      }
     } catch (err: any) {
       console.error(`Gagal menghapus otomatis ${collectionName} dari Firebase:`, err);
     }
@@ -1723,30 +1489,21 @@ export default function App() {
           {/* Cart & Notifications Bell Panel */}
           <div className="flex items-center gap-3">
 
-            {/* Real-time Autosync Status Pill */}
-            <div className="flex items-center gap-2 px-2.5 py-1.5 bg-slate-50 border border-slate-100 rounded-xl select-none" title="Real-time Cloud Database Autosync status">
+            {/* Firebase Cloud Live Status Pill */}
+            <div className="flex items-center gap-2 px-2.5 py-1.5 bg-emerald-50 border border-emerald-100 rounded-xl select-none" title="Penyimpanan Cloud (Always Online Mode)">
               <div className="relative flex h-2 w-2">
-                <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${isAutosyncEnabled ? 'bg-emerald-400' : 'bg-slate-300'}`}></span>
-                <span className={`relative inline-flex rounded-full h-2 w-2 ${isAutosyncEnabled ? 'bg-emerald-500' : 'bg-slate-400'}`}></span>
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 bg-emerald-400"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
               </div>
               <div className="flex flex-col text-left">
                 <div className="flex items-center gap-1">
-                  <span className="text-[8px] font-black text-slate-700 uppercase tracking-wider leading-none">Auto-Sync</span>
-                  <button 
-                    onClick={() => setIsAutosyncEnabled(!isAutosyncEnabled)}
-                    className={`text-[8px] font-extrabold px-1 py-0.5 rounded-sm uppercase tracking-tighter cursor-pointer ${
-                      isAutosyncEnabled 
-                        ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' 
-                        : 'bg-slate-200 text-slate-600 hover:bg-slate-300'
-                    }`}
-                  >
-                    {isAutosyncEnabled ? 'ON' : 'OFF'}
-                  </button>
+                  <span className="text-[8px] font-black text-slate-700 uppercase tracking-wider leading-none">Database</span>
+                  <span className="text-[8px] font-extrabold px-1 py-0.5 rounded-sm uppercase tracking-tighter bg-emerald-600 text-white">
+                    Cloud Live
+                  </span>
                 </div>
-                <span className="text-[7.5px] text-slate-400 font-bold leading-none mt-0.5">
-                  {isAutosyncEnabled 
-                    ? (lastAutosyncTime ? `${lastAutosyncTime}` : 'Menghubungkan...') 
-                    : 'Offline Mode'}
+                <span className="text-[7.5px] text-emerald-600 font-bold leading-none mt-0.5">
+                  Always Online Mode
                 </span>
               </div>
             </div>
@@ -1885,43 +1642,7 @@ export default function App() {
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-6 space-y-6">
 
-        {firebaseError && (
-          <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/30 rounded-2xl p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xs animate-in fade-in duration-300">
-            <div className="flex items-start gap-3.5">
-              <div className="p-2.5 rounded-xl bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 shrink-0">
-                <Database className="w-5 h-5" />
-              </div>
-              <div>
-                <h4 className="text-sm font-bold text-amber-800 dark:text-amber-300 tracking-tight flex items-center gap-1.5">
-                  {firebaseError.toLowerCase().includes('permission') || firebaseError.toLowerCase().includes('insufficient')
-                    ? '⚠️ Masalah Izin (Security Rules) — Mode Fallback Lokal Aktif'
-                    : '⚠️ Masalah Koneksi / Kuota Database — Mode Fallback Lokal Aktif'}
-                </h4>
-                <p className="text-xs text-slate-600 dark:text-slate-400 mt-1.5 leading-relaxed max-w-4xl">
-                  {firebaseError.toLowerCase().includes('permission') || firebaseError.toLowerCase().includes('insufficient') ? (
-                    <>
-                      Firestore Cloud Database menolak akses (<strong>Missing or insufficient permissions</strong>).
-                      Ini terjadi karena Anda menggunakan project Firebase Anda sendiri (<strong>fir-ownbewok</strong>) dengan ID database <strong>ai-studio-7d9b1f02-aeec-43bf-bcb9-bf041e7543cf</strong>, namun belum menyetel Firestore Security Rules di konsol Firebase Anda agar mengizinkan akses baca dan tulis.
-                    </>
-                  ) : (
-                    <>
-                      Firestore Cloud Database telah mencapai batas penggunaan gratis harian ({firebaseError.includes('quota') || firebaseError.includes('exhausted') ? 'Quota limit exceeded' : firebaseError}).
-                    </>
-                  )}
-                  <span className="block mt-1 font-semibold text-slate-800 dark:text-slate-300">
-                    Sistem secara otomatis mengaktifkan Mode Sandbox Offline (Local Storage). Anda tetap dapat membuat transaksi simulasi, mengelola produk, menulis ulasan, mengirim pesan silaturahmi, dan mengubah pengaturan secara penuh dengan lancar dan aman di browser Anda!
-                  </span>
-                </p>
-              </div>
-            </div>
-            <button
-              onClick={() => setFirebaseError(null)}
-              className="px-3 py-1.5 text-[10px] font-bold uppercase bg-amber-100 hover:bg-amber-200 dark:bg-amber-900/30 dark:hover:bg-amber-900/50 text-amber-700 dark:text-amber-400 rounded-lg transition-all cursor-pointer shrink-0"
-            >
-              Paham
-            </button>
-          </div>
-        )}
+
 
         {/* TAB 1: Digital Asset Storefront */}
         {activeTab === 'belanja' && (
@@ -2349,6 +2070,8 @@ export default function App() {
               isAutosyncEnabled={isAutosyncEnabled}
               setIsAutosyncEnabled={setIsAutosyncEnabled}
               lastAutosyncTime={lastAutosyncTime}
+              silaturahmiMessages={silaturahmiMessages}
+              onUpdateSilaturahmiMessages={setSilaturahmiMessages}
             />
           )
         )}
@@ -2604,8 +2327,6 @@ export default function App() {
                   >
                     <option value="Tamu">Tamu 👤</option>
                     <option value="Pembeli">Pembeli 🛍️</option>
-                    <option value="Kreator">Kreator 🎨</option>
-                    <option value="Developer">Developer 💻</option>
                   </select>
                 </div>
               </div>

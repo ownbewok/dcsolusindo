@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useMemo } from 'react';
-import { Product, Transaction, SystemLog, PaymentStatus, ShopBranding, VaultUser, PaymentMethodConfig, Complaint, AdminUser, PromoCode } from '../types';
+import { Product, Transaction, SystemLog, PaymentStatus, ShopBranding, VaultUser, PaymentMethodConfig, Complaint, AdminUser, PromoCode, SilaturahmiMessage } from '../types';
 import { 
   Activity, 
   ShieldCheck, 
@@ -49,11 +49,12 @@ import {
   Calendar,
   DollarSign,
   ExternalLink,
+  RotateCcw,
   Save,
   Type
 } from 'lucide-react';
 import { InvoiceModal } from './InvoiceModal';
-import { bulkPushToFirebase, syncToFirebase } from '../lib/firebaseSync';
+import { bulkPushToFirebase, syncToFirebase, testFirebaseConnection, ConnectionTestResult, getActiveFirebaseConfig, FirebaseConfigType } from '../lib/firebaseSync';
 
 interface AdminDashboardProps {
   products: Product[];
@@ -87,6 +88,8 @@ interface AdminDashboardProps {
   isAutosyncEnabled?: boolean;
   setIsAutosyncEnabled?: (val: boolean) => void;
   lastAutosyncTime?: string | null;
+  silaturahmiMessages?: SilaturahmiMessage[];
+  onUpdateSilaturahmiMessages?: (messages: SilaturahmiMessage[]) => void;
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
@@ -121,8 +124,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   isAutosyncEnabled,
   setIsAutosyncEnabled,
   lastAutosyncTime,
+  silaturahmiMessages = [],
+  onUpdateSilaturahmiMessages,
 }) => {
-  const [activeTab, setActiveTab] = useState<'transactions' | 'products' | 'users' | 'logs' | 'settings' | 'complaints_payments' | 'promos'>('transactions');
+  const [activeTab, setActiveTab] = useState<'transactions' | 'products' | 'users' | 'logs' | 'settings' | 'complaints_payments' | 'promos' | 'silaturahmi'>('transactions');
 
   // Local draft state for shop settings to avoid editing props and database syncing directly on keystroke
   const [draftBranding, setDraftBranding] = useState<ShopBranding>(() => ({ ...branding }));
@@ -284,9 +289,64 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
+  // Firebase Configuration & Diagnostics State
+  const [firebaseConfigState, setFirebaseConfigState] = useState<FirebaseConfigType>(() => getActiveFirebaseConfig());
+  const [showFullDbConfig, setShowFullDbConfig] = useState<boolean>(false);
+  const [dbSaveSuccess, setDbSaveSuccess] = useState<boolean>(false);
+
   // Bulk sync to Firebase states
   const [bulkSyncStatus, setBulkSyncStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
   const [bulkSyncLogs, setBulkSyncLogs] = useState<string[]>([]);
+
+  // Firebase Live Connection Test states
+  const [testConnStatus, setTestConnStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
+  const [testConnResult, setTestConnResult] = useState<ConnectionTestResult | null>(null);
+
+  const handleTestFirebaseConnection = async (configOverride?: FirebaseConfigType) => {
+    setTestConnStatus('testing');
+    setTestConnResult(null);
+    try {
+      const activeConfig = (configOverride && typeof configOverride === 'object' && 'projectId' in configOverride)
+        ? configOverride
+        : firebaseConfigState;
+
+      const res = await testFirebaseConnection(activeConfig);
+      setTestConnResult(res);
+      if (res.success) {
+        setTestConnStatus('success');
+        if (onAddSystemLog) {
+          onAddSystemLog(
+            'system',
+            'Test Koneksi Firebase Sukses',
+            `Pemeriksaan koneksi Firebase Firestore sukses. Berhasil terhubung ke Project ID: ${res.details?.projectId || 'N/A'}.`,
+            'admin@system'
+          );
+        }
+      } else {
+        setTestConnStatus('error');
+        if (onAddSystemLog) {
+          onAddSystemLog(
+            'system',
+            'Test Koneksi Firebase Gagal',
+            `Gagal terhubung ke Firebase Firestore. Error: ${res.details?.errorMessage || res.message}`,
+            'admin@system'
+          );
+        }
+      }
+    } catch (err: any) {
+      setTestConnStatus('error');
+      setTestConnResult({
+        success: false,
+        message: `Terjadi kesalahan internal saat mencoba melakukan tes koneksi: ${err.message || err}`,
+        details: {
+          projectId: 'N/A',
+          databaseId: 'N/A',
+          errorMessage: err.message || String(err),
+          step: 'catch_block'
+        }
+      });
+    }
+  };
 
   const handleBulkSyncAll = async () => {
     setBulkSyncStatus('syncing');
@@ -422,6 +482,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // Selected Invoice for Modal View
   const [selectedInvoice, setSelectedInvoice] = useState<Transaction | null>(null);
+
+  // Silaturahmi Reply Form States
+  const [adminReplyName, setAdminReplyName] = useState(loggedInAdmin?.fullName || 'Admin System');
+  const [adminReplyRole, setAdminReplyRole] = useState<'Owner' | 'Creator' | 'Developer'>('Owner');
+  const [adminReplyMessage, setAdminReplyMessage] = useState('');
+  const [isSubmittingReply, setIsSubmittingReply] = useState(false);
 
   // State for Direct Invoice Creator
   const [isInvoiceFormOpen, setIsInvoiceFormOpen] = useState(false);
@@ -1088,6 +1154,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               }`}
             >
               <Tag className="w-3.5 h-3.5 text-rose-500" /> Voucher & Promo ({promoCodes?.length || 0})
+            </button>
+            <button
+              onClick={() => setActiveTab('silaturahmi')}
+              className={`px-4 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1 ${
+                activeTab === 'silaturahmi' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              🤝 Pojok Silaturahmi ({silaturahmiMessages?.length || 0})
             </button>
           </div>
 
@@ -3349,36 +3423,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <div className="space-y-0.5">
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-bold text-slate-900">Status Auto-Sync Real-Time</span>
-                    <span className={`inline-flex items-center gap-1 text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${
-                      isAutosyncEnabled 
-                        ? 'bg-emerald-100 text-emerald-800 animate-pulse' 
-                        : 'bg-slate-200 text-slate-700'
-                    }`}>
-                      {isAutosyncEnabled ? '● Aktif (Live)' : '○ Nonaktif (Manual)'}
+                    <span className="inline-flex items-center gap-1 text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 animate-pulse">
+                      ● Aktif (Penuh)
                     </span>
                   </div>
                   <p className="text-[10px] text-slate-500 font-medium">
-                    {isAutosyncEnabled 
-                      ? `Terakhir diperbarui dari Cloud: ${lastAutosyncTime || 'Sedang menghubungkan...'}` 
-                      : 'Aktifkan untuk menerima pembaruan produk, transaksi, dan ulasan secara langsung.'}
+                    Always Online Mode: Terakhir diperbarui dari Cloud: {lastAutosyncTime || 'Sedang sinkronisasi...'}
                   </p>
                 </div>
 
-                {setIsAutosyncEnabled && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsAutosyncEnabled(!isAutosyncEnabled);
-                    }}
-                    className={`px-4 py-2 text-xs font-black rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-sm select-none shrink-0 ${
-                      isAutosyncEnabled
-                        ? 'bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-100'
-                        : 'bg-emerald-600 hover:bg-emerald-700 text-white hover:scale-[1.02] active:scale-[0.98]'
-                    }`}
-                  >
-                    {isAutosyncEnabled ? 'Matikan Auto-Sync' : 'Aktifkan Auto-Sync'}
-                  </button>
-                )}
+                <div className="px-3.5 py-2 text-[10px] font-bold text-emerald-700 bg-emerald-50 rounded-xl border border-emerald-100 select-none shrink-0 flex items-center gap-1.5 shadow-xs">
+                  🔒 Online Permanen
+                </div>
               </div>
             </div>
 
@@ -3520,6 +3576,305 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 💡 <span className="font-bold">Tips Penjualan:</span> Logo dan Slogan yang dirancang dengan apik meningkatkan tingkat kepercayaan pembeli (conversion rate) hingga 45%! Pastikan warna senada dengan jenis aset digital yang dipasarkan.
               </div>
 
+            </div>
+
+            {/* Firebase Database Configuration Card */}
+            <div className="bg-white border border-slate-100 rounded-3xl p-6 shadow-xs space-y-4 animate-in fade-in duration-200">
+              <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
+                <div>
+                  <h4 className="text-[11px] font-black text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                    <Database className="w-4 h-4 text-sky-600" /> Pengaturan Database Firebase
+                  </h4>
+                  <p className="text-[9.5px] text-slate-400 mt-0.5">Ubah dan konfigurasikan target database Firebase Firestore Anda.</p>
+                </div>
+              </div>
+
+              <div className="space-y-3.5">
+                {/* Project ID */}
+                <div>
+                  <label className="block text-[9px] font-black text-slate-500 uppercase tracking-wider mb-1">
+                    Project ID <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={firebaseConfigState.projectId || ''}
+                    onChange={(e) => setFirebaseConfigState({ ...firebaseConfigState, projectId: e.target.value })}
+                    className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl font-mono focus:outline-none focus:ring-1 focus:ring-sky-500 bg-slate-50/50"
+                    placeholder="Contoh: horizontal-quarter-n79b0"
+                  />
+                </div>
+
+                {/* Firestore Database ID */}
+                <div>
+                  <label className="block text-[9px] font-black text-slate-500 uppercase tracking-wider mb-1">
+                    Firestore Database ID (Opsional)
+                  </label>
+                  <input
+                    type="text"
+                    value={firebaseConfigState.firestoreDatabaseId || ''}
+                    onChange={(e) => setFirebaseConfigState({ ...firebaseConfigState, firestoreDatabaseId: e.target.value })}
+                    className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl font-mono focus:outline-none focus:ring-1 focus:ring-sky-500 bg-slate-50/50"
+                    placeholder="default atau ID kustom"
+                  />
+                </div>
+
+                {/* Show more / full config toggle */}
+                <button
+                  type="button"
+                  onClick={() => setShowFullDbConfig(!showFullDbConfig)}
+                  className="text-[10px] font-bold text-sky-600 hover:text-sky-700 transition-colors flex items-center gap-1"
+                >
+                  {showFullDbConfig ? 'Sembunyikan Kredensial Detail ▲' : 'Tampilkan Kredensial Detail (API Key, App ID, dll) ▼'}
+                </button>
+
+                {showFullDbConfig && (
+                  <div className="space-y-3 pt-2 border-t border-slate-100 animate-in slide-in-from-top-2 duration-200">
+                    {/* API Key */}
+                    <div>
+                      <label className="block text-[9px] font-black text-slate-500 uppercase tracking-wider mb-1">
+                        API Key
+                      </label>
+                      <input
+                        type="password"
+                        value={firebaseConfigState.apiKey || ''}
+                        onChange={(e) => setFirebaseConfigState({ ...firebaseConfigState, apiKey: e.target.value })}
+                        className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl font-mono focus:outline-none focus:ring-1 focus:ring-sky-500 bg-slate-50/50"
+                        placeholder="AIzaSy..."
+                      />
+                    </div>
+
+                    {/* Auth Domain */}
+                    <div>
+                      <label className="block text-[9px] font-black text-slate-500 uppercase tracking-wider mb-1">
+                        Auth Domain
+                      </label>
+                      <input
+                        type="text"
+                        value={firebaseConfigState.authDomain || ''}
+                        onChange={(e) => setFirebaseConfigState({ ...firebaseConfigState, authDomain: e.target.value })}
+                        className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl font-mono focus:outline-none focus:ring-1 focus:ring-sky-500 bg-slate-50/50"
+                        placeholder="project.firebaseapp.com"
+                      />
+                    </div>
+
+                    {/* Storage Bucket */}
+                    <div>
+                      <label className="block text-[9px] font-black text-slate-500 uppercase tracking-wider mb-1">
+                        Storage Bucket
+                      </label>
+                      <input
+                        type="text"
+                        value={firebaseConfigState.storageBucket || ''}
+                        onChange={(e) => setFirebaseConfigState({ ...firebaseConfigState, storageBucket: e.target.value })}
+                        className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl font-mono focus:outline-none focus:ring-1 focus:ring-sky-500 bg-slate-50/50"
+                        placeholder="project.appspot.com"
+                      />
+                    </div>
+
+                    {/* Messaging Sender ID */}
+                    <div>
+                      <label className="block text-[9px] font-black text-slate-500 uppercase tracking-wider mb-1">
+                        Messaging Sender ID
+                      </label>
+                      <input
+                        type="text"
+                        value={firebaseConfigState.messagingSenderId || ''}
+                        onChange={(e) => setFirebaseConfigState({ ...firebaseConfigState, messagingSenderId: e.target.value })}
+                        className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl font-mono focus:outline-none focus:ring-1 focus:ring-sky-500 bg-slate-50/50"
+                        placeholder="Angka Sender ID"
+                      />
+                    </div>
+
+                    {/* App ID */}
+                    <div>
+                      <label className="block text-[9px] font-black text-slate-500 uppercase tracking-wider mb-1">
+                        App ID
+                      </label>
+                      <input
+                        type="text"
+                        value={firebaseConfigState.appId || ''}
+                        onChange={(e) => setFirebaseConfigState({ ...firebaseConfigState, appId: e.target.value })}
+                        className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl font-mono focus:outline-none focus:ring-1 focus:ring-sky-500 bg-slate-50/50"
+                        placeholder="1:123456789:web:abcdef..."
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => {
+                    localStorage.setItem('digimarket_custom_firebase', JSON.stringify(firebaseConfigState));
+                    setDbSaveSuccess(true);
+                    setTimeout(() => setDbSaveSuccess(false), 3000);
+                    if (onAddSystemLog) {
+                      onAddSystemLog(
+                        'system',
+                        'Konfigurasi Firebase Diperbarui',
+                        `Pengaturan kredensial Firebase diperbarui ke Project ID: ${firebaseConfigState.projectId}`,
+                        'admin@system'
+                      );
+                    }
+                  }}
+                  className="flex-1 py-2 px-3 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold rounded-xl shadow-xs transition-all flex items-center justify-center gap-1 cursor-pointer"
+                >
+                  {dbSaveSuccess ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 animate-bounce" /> Tersimpan!
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-3.5 h-3.5" /> Simpan Config
+                    </>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    localStorage.removeItem('digimarket_custom_firebase');
+                    const defaultConfig = getActiveFirebaseConfig();
+                    setFirebaseConfigState(defaultConfig);
+                    if (onAddSystemLog) {
+                      onAddSystemLog(
+                        'system',
+                        'Reset Konfigurasi Firebase',
+                        `Konfigurasi Firebase berhasil di-reset kembali ke bawaan sistem.`,
+                        'admin@system'
+                      );
+                    }
+                  }}
+                  className="py-2 px-3 bg-slate-100 hover:bg-slate-200 text-slate-600 text-[10px] font-bold rounded-xl transition-all flex items-center justify-center gap-1 cursor-pointer border border-slate-200"
+                  title="Reset ke Bawaan Sistem"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" /> Reset Default
+                </button>
+              </div>
+            </div>
+
+            {/* Firebase Live Connection Diagnostic Card */}
+            <div className="bg-white border border-slate-100 rounded-3xl p-6 shadow-xs space-y-4 animate-in fade-in duration-200">
+              <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
+                <div>
+                  <h4 className="text-[11px] font-black text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                    <Activity className={`w-4 h-4 text-sky-600 ${testConnStatus === 'testing' ? 'animate-pulse' : ''}`} /> Diagnostic Koneksi Firebase
+                  </h4>
+                  <p className="text-[9.5px] text-slate-400 mt-0.5">Uji coba koneksi langsung dari browser Anda ke Firestore Cloud.</p>
+                </div>
+                {testConnStatus === 'testing' ? (
+                  <span className="flex items-center gap-1 px-2 py-0.5 bg-amber-50 text-amber-700 text-[9px] font-bold rounded-full animate-pulse">
+                    Menguji...
+                  </span>
+                ) : testConnStatus === 'success' ? (
+                  <span className="flex items-center gap-1 px-2 py-0.5 bg-emerald-50 text-emerald-700 text-[9px] font-bold rounded-full">
+                    Sukses
+                  </span>
+                ) : testConnStatus === 'error' ? (
+                  <span className="flex items-center gap-1 px-2 py-0.5 bg-rose-50 text-rose-700 text-[9px] font-bold rounded-full">
+                    Gagal
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1 px-2 py-0.5 bg-slate-100 text-slate-500 text-[9px] font-bold rounded-full">
+                    Belum Diuji
+                  </span>
+                )}
+              </div>
+
+              {/* Connection Specs */}
+              <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100 text-[10px] space-y-1.5">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-400 uppercase font-bold text-[8.5px]">Project ID:</span>
+                  <span className="font-mono font-bold text-slate-700">{firebaseConfigState.projectId || '(Belum Diisi)'}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-400 uppercase font-bold text-[8.5px]">Database ID:</span>
+                  <span className="font-mono font-bold text-slate-700">{firebaseConfigState.firestoreDatabaseId || '(default)'}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-400 uppercase font-bold text-[8.5px]">Auth Domain:</span>
+                  <span className="font-mono text-slate-500 text-[9px]">{firebaseConfigState.authDomain || '(Belum Diisi)'}</span>
+                </div>
+              </div>
+
+              {/* Diagnostic result panel */}
+              {testConnResult && (
+                <div className={`p-4 rounded-2xl border text-xs leading-relaxed space-y-2 animate-in fade-in duration-200 ${
+                  testConnResult.success 
+                    ? 'bg-emerald-50/50 border-emerald-100 text-slate-700' 
+                    : 'bg-rose-50/50 border-rose-100 text-slate-700'
+                }`}>
+                  <div className="flex items-start gap-2">
+                    {testConnResult.success ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                    ) : (
+                      <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                    )}
+                    <div>
+                      <h5 className={`font-bold text-[11px] uppercase tracking-wide ${
+                        testConnResult.success ? 'text-emerald-800' : 'text-rose-800'
+                      }`}>
+                        {testConnResult.success ? 'Koneksi Berhasil!' : 'Koneksi Gagal / Bermasalah!'}
+                      </h5>
+                      <p className="text-[10px] mt-0.5 text-slate-600 leading-relaxed">
+                        {testConnResult.message}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Diagnostic details */}
+                  <div className="bg-white/80 border border-slate-100 rounded-xl p-3 text-[9px] font-mono space-y-1 text-slate-500">
+                    <div className="font-bold text-slate-700 border-b border-slate-100 pb-1 mb-1 flex justify-between items-center">
+                      <span>Detail Log Diagnostik</span>
+                      {testConnResult.details?.latencyMs !== undefined && (
+                        <span className="text-[8px] bg-slate-100 px-1.5 py-0.5 rounded-md text-slate-500 font-bold">
+                          Latency: {testConnResult.details.latencyMs} ms
+                        </span>
+                      )}
+                    </div>
+                    <div>Status: <span className={testConnResult.success ? 'text-emerald-600 font-bold' : 'text-rose-600 font-bold'}>{testConnResult.success ? 'SUCCESS' : 'FAILED'}</span></div>
+                    {testConnResult.details?.errorType && (
+                      <div>Kategori Error: <span className="text-amber-600 font-bold">{testConnResult.details.errorType}</span></div>
+                    )}
+                    {testConnResult.details?.errorMessage && (
+                      <div className="max-h-[80px] overflow-y-auto whitespace-pre-wrap break-all mt-1 bg-slate-50 p-1.5 rounded-lg border border-slate-100 text-[8.5px]">
+                        {testConnResult.details.errorMessage}
+                      </div>
+                    )}
+                    {testConnResult.details?.errorType === 'PERMISSION_DENIED' && (
+                      <div className="mt-2 text-amber-700 bg-amber-50/80 p-2 rounded-lg border border-amber-100 font-sans leading-relaxed text-[8.5px]">
+                        <strong>💡 Solusi Security Rules:</strong> Koneksi server terhubung sepenuhnya! Anda hanya perlu menyesuaikan <code>firestore.rules</code> di console Firebase Anda agar mengizinkan akses baca/tulis, atau jalankan perintah sinkronisasi massal di bawah.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Start Test Button */}
+              <button
+                type="button"
+                onClick={() => handleTestFirebaseConnection()}
+                disabled={testConnStatus === 'testing'}
+                className={`w-full py-2.5 px-4 rounded-xl text-xs font-black tracking-wide flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                  testConnStatus === 'testing'
+                    ? 'bg-slate-100 text-slate-400 border border-slate-200'
+                    : 'bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-100 hover:scale-[1.01] active:scale-[0.99]'
+                }`}
+              >
+                {testConnStatus === 'testing' ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin text-slate-400" />
+                    Melakukan Diagnostik Ping...
+                  </>
+                ) : (
+                  <>
+                    <Activity className="w-4 h-4" />
+                    Mulai Tes Koneksi Firebase
+                  </>
+                )}
+              </button>
             </div>
 
             {/* Cloud Sync Manager Card */}
@@ -4120,6 +4475,224 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           </div>
 
+        </div>
+      )}
+
+      {/* TAB: Pojok Silaturahmi Moderation & Admin Replies */}
+      {activeTab === 'silaturahmi' && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-in fade-in duration-200">
+          {/* LEFT: Reply Form & Guidelines (4 cols) */}
+          <div className="lg:col-span-4 space-y-4">
+            <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-xs">
+              <div className="border-b border-slate-100 pb-3 mb-4">
+                <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                  <MessageSquare className="w-4 h-4 text-sky-600 animate-pulse" /> Balas Silaturahmi (Admin)
+                </h3>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Kirim balasan resmi dengan salah satu identitas/peran Admin.
+                </p>
+              </div>
+
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  if (!adminReplyName.trim() || !adminReplyMessage.trim()) return;
+                  setIsSubmittingReply(true);
+
+                  // Colors bank
+                  const colors = [
+                    'bg-indigo-600 text-white font-black',
+                    'bg-emerald-600 text-white font-black',
+                    'bg-rose-600 text-white font-black',
+                    'bg-sky-600 text-white font-black',
+                    'bg-amber-600 text-white font-black',
+                    'bg-purple-600 text-white font-black',
+                    'bg-violet-600 text-white font-black'
+                  ];
+
+                  const newMessage: SilaturahmiMessage = {
+                    id: `msg-${Date.now()}`,
+                    name: adminReplyName.trim(),
+                    message: adminReplyMessage.trim(),
+                    timestamp: new Date().toISOString(),
+                    avatarColor: colors[Math.floor(Math.random() * colors.length)],
+                    role: adminReplyRole,
+                  };
+
+                  try {
+                    // Sync to Firebase and update local state
+                    await syncToFirebase('silaturahmi', newMessage.id, newMessage);
+                    if (onUpdateSilaturahmiMessages) {
+                      onUpdateSilaturahmiMessages([...silaturahmiMessages, newMessage]);
+                    }
+                    setAdminReplyMessage('');
+                    alert(`🎉 Berhasil mengirim balasan sebagai ${adminReplyRole}!`);
+                  } catch (err: any) {
+                    console.error('Failed to sync reply:', err);
+                    alert('Gagal mengirim ke cloud, mencoba menyalin secara lokal.');
+                    if (onUpdateSilaturahmiMessages) {
+                      onUpdateSilaturahmiMessages([...silaturahmiMessages, newMessage]);
+                    }
+                  } finally {
+                    setIsSubmittingReply(false);
+                  }
+                }}
+                className="space-y-4"
+              >
+                <div>
+                  <label className="block text-[8px] font-black uppercase text-slate-400 tracking-wider mb-1.5">Nama Panggilan</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Nama Admin"
+                    value={adminReplyName}
+                    onChange={(e) => setAdminReplyName(e.target.value)}
+                    className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 focus:bg-white focus:outline-hidden font-medium text-slate-800"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[8px] font-black uppercase text-slate-400 tracking-wider mb-1.5">Pilih Peran Balasan</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {(['Owner', 'Creator', 'Developer'] as const).map((role) => (
+                      <button
+                        key={role}
+                        type="button"
+                        onClick={() => setAdminReplyRole(role)}
+                        className={`py-1.5 px-2 text-[10px] font-bold rounded-xl border transition-all cursor-pointer text-center ${
+                          adminReplyRole === role
+                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                            : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        {role}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[8px] font-black uppercase text-slate-400 tracking-wider mb-1.5">Isi Pesan Balasan</label>
+                  <textarea
+                    required
+                    maxLength={120}
+                    placeholder="Tulis balasan hangat atau panduan teknis..."
+                    value={adminReplyMessage}
+                    onChange={(e) => setAdminReplyMessage(e.target.value)}
+                    rows={3}
+                    className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl p-3 focus:bg-white focus:outline-hidden font-medium text-slate-700 resize-none"
+                  />
+                  <span className="text-[9px] text-slate-400 font-medium block text-right mt-1">
+                    {adminReplyMessage.length}/120 karakter
+                  </span>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isSubmittingReply}
+                  className="w-full py-2.5 bg-sky-600 hover:bg-sky-700 disabled:bg-slate-300 text-white text-xs font-black rounded-xl transition-all hover:scale-[1.01] active:scale-[0.99] cursor-pointer flex items-center justify-center gap-2 shadow-xs"
+                >
+                  {isSubmittingReply ? 'Mengirim...' : 'Kirim Balasan Resmi ✨'}
+                </button>
+              </form>
+            </div>
+
+            <div className="bg-amber-50/50 border border-amber-100 rounded-2xl p-4 text-[10px] text-amber-800 leading-relaxed space-y-2">
+              <span className="font-bold block text-[11px]">📝 Aturan Pojok Silaturahmi:</span>
+              <p>1. Menu depan hanya memperbolehkan pengunjung memilih peran <strong>Tamu 👤</strong> atau <strong>Pembeli 🛍️</strong>.</p>
+              <p>2. Peran administratif tingkat tinggi seperti <strong>Owner</strong>, <strong>Creator</strong>, atau <strong>Developer</strong> hanya boleh diposting melalui panel Admin System rahasia ini.</p>
+            </div>
+          </div>
+
+          {/* RIGHT: Silaturahmi Feed & Moderation (8 cols) */}
+          <div className="lg:col-span-8">
+            <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-xs min-h-[450px] flex flex-col">
+              <div className="border-b border-slate-100 pb-3 mb-4 flex items-center justify-between">
+                <div>
+                  <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                    🤝 Log & Moderasi Pojok Silaturahmi
+                  </h3>
+                  <p className="text-[10px] text-slate-400 mt-1">Daftar sapaan dari pengunjung secara real-time. Anda dapat memantau dan menghapus pesan yang tidak pantas.</p>
+                </div>
+                <span className="text-[9.5px] font-extrabold px-2 py-1 rounded bg-slate-100 text-slate-700">
+                  Total: {silaturahmiMessages?.length || 0} Pesan
+                </span>
+              </div>
+
+              <div className="flex-1 space-y-3.5 max-h-[500px] overflow-y-auto pr-2">
+                {(!silaturahmiMessages || silaturahmiMessages.length === 0) ? (
+                  <div className="h-full flex flex-col items-center justify-center text-slate-400 py-12">
+                    <span className="text-2xl">🤝</span>
+                    <span className="text-[10.5px] font-bold mt-2">Belum ada sapaan silaturahmi</span>
+                  </div>
+                ) : (
+                  [...silaturahmiMessages].reverse().map((msg) => {
+                    const dateObj = new Date(msg.timestamp);
+                    const dateStr = isNaN(dateObj.getTime()) 
+                      ? 'Baru saja' 
+                      : dateObj.toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' });
+
+                    // Roles badges
+                    const isPremiumRole = ['Owner', 'Creator', 'Developer', 'Kreator'].includes(msg.role || '');
+                    const isBuyer = msg.role === 'Pembeli';
+
+                    const roleBadgeColor = isPremiumRole
+                      ? 'bg-indigo-100 text-indigo-800 border-indigo-200'
+                      : isBuyer
+                        ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                        : 'bg-slate-100 text-slate-700 border-slate-200';
+
+                    return (
+                      <div key={msg.id} className="flex gap-3 items-start border border-slate-50 hover:border-slate-100 bg-slate-50/20 hover:bg-slate-50/50 p-3.5 rounded-2xl transition-all">
+                        <div className={`w-9 h-9 rounded-full flex items-center justify-center font-black text-xs shrink-0 ${msg.avatarColor || 'bg-slate-200 text-slate-700'}`}>
+                          {msg.name ? msg.name.charAt(0).toUpperCase() : '?' }
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-2 flex-wrap mb-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-black text-slate-800">{msg.name}</span>
+                              <span className={`px-1.5 py-0.2 text-[8px] font-black uppercase rounded-sm border ${roleBadgeColor}`}>
+                                {msg.role || 'Tamu'}
+                              </span>
+                            </div>
+                            <span className="text-[9px] font-medium font-mono text-slate-400">{dateStr}</span>
+                          </div>
+                          <p className="text-[11px] text-slate-600 font-medium leading-relaxed break-words">{msg.message}</p>
+                        </div>
+
+                        {/* Moderation Actions (Delete option for Admin) */}
+                        <button
+                          onClick={async () => {
+                            if (!confirm(`Hapus pesan silaturahmi dari ${msg.name}?`)) return;
+                            try {
+                              const { deleteDoc, doc } = await import('firebase/firestore');
+                              const { db } = await import('../firebase');
+                              await deleteDoc(doc(db, 'silaturahmi', msg.id));
+                              
+                              if (onUpdateSilaturahmiMessages) {
+                                onUpdateSilaturahmiMessages(silaturahmiMessages.filter(m => m.id !== msg.id));
+                              }
+                              alert('Pesan berhasil dihapus dari cloud Firestore.');
+                            } catch (error: any) {
+                              console.error('Failed to delete silaturahmi message:', error);
+                              // Local fallback
+                              if (onUpdateSilaturahmiMessages) {
+                                onUpdateSilaturahmiMessages(silaturahmiMessages.filter(m => m.id !== msg.id));
+                              }
+                            }
+                          }}
+                          className="p-1.5 bg-rose-50 hover:bg-rose-150 text-rose-600 rounded-lg transition-all cursor-pointer"
+                          title="Hapus Pesan Silaturahmi"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
