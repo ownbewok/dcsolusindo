@@ -128,6 +128,8 @@ export interface ShopBranding {
   whatsappNumber?: string;
   fontFamily?: 'inter' | 'ubuntu' | 'noteworthy';
   productsLimit?: number;
+  defaultTheme?: 'light' | 'dark';
+  showOfficialPaymentsModule?: boolean;
 }
 
 export interface PaymentMethodConfig {

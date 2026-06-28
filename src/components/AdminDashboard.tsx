@@ -2892,6 +2892,59 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
               </div>
 
+              {/* Default Light/Dark Theme Selector */}
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                  🌓 Default Mode Tampilan Aplikasi
+                </label>
+                <div className="flex gap-3">
+                  {[
+                    { id: 'light', name: 'Mode Terang (Light Mode)', icon: '☀️' },
+                    { id: 'dark', name: 'Mode Gelap (Dark Mode)', icon: '🌙' },
+                  ].map((themeOpt) => (
+                    <button
+                      key={themeOpt.id}
+                      type="button"
+                      onClick={() => setDraftBranding({ ...draftBranding, defaultTheme: themeOpt.id as 'light' | 'dark' })}
+                      className={`flex-1 py-3 px-4 border rounded-xl text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                        (draftBranding.defaultTheme || 'light') === themeOpt.id
+                          ? 'border-slate-900 bg-slate-950 text-white font-extrabold shadow-sm'
+                          : 'border-slate-200 text-slate-600 bg-slate-50/50 hover:bg-slate-100'
+                      }`}
+                    >
+                      <span>{themeOpt.icon}</span>
+                      <span>{themeOpt.name}</span>
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[9.5px] text-slate-400 mt-1.5 font-medium leading-relaxed">
+                  Pengaturan ini akan menetapkan tema default untuk seluruh pengunjung pertama kali. Pengunjung tetap dapat mengubah mode tampilan sementara menggunakan tombol toggle di sudut kanan atas.
+                </p>
+              </div>
+
+              {/* Show/Hide Official Payment Methods Module Toggle */}
+              <div className="bg-slate-50 border border-slate-200 p-4 rounded-2xl flex items-center justify-between gap-4">
+                <div className="space-y-0.5">
+                  <label className="block text-xs font-black text-slate-800">
+                    💳 Modul Metode Pembayaran Resmi
+                  </label>
+                  <p className="text-[10px] text-slate-400 font-medium leading-relaxed">
+                    Tampilkan modul "Metode Pembayaran Resmi Terverifikasi" di halaman depan toko untuk memudahkan pembeli menyalin rekening.
+                  </p>
+                </div>
+                <div className="flex items-center shrink-0">
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={draftBranding.showOfficialPaymentsModule !== false}
+                      onChange={(e) => setDraftBranding({ ...draftBranding, showOfficialPaymentsModule: e.target.checked })}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+                  </label>
+                </div>
+              </div>
+
               {/* Hero Banner Text Fields */}
               <div className="space-y-4 pt-2">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

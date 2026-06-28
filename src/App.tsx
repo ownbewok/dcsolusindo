@@ -43,6 +43,8 @@ import {
   Moon,
   Sun,
   Heart,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { 
   syncToFirebase, 
@@ -170,6 +172,8 @@ export default function App() {
           whatsappNumber: parsed.whatsappNumber || '6282288882512',
           fontFamily: parsed.fontFamily || 'inter',
           productsLimit: parsed.productsLimit || 6,
+          defaultTheme: parsed.defaultTheme || 'light',
+          showOfficialPaymentsModule: parsed.showOfficialPaymentsModule !== undefined ? parsed.showOfficialPaymentsModule : true,
         };
       } catch (e) {
         // ignore
@@ -201,8 +205,16 @@ export default function App() {
       whatsappNumber: '6282288882512',
       fontFamily: 'inter',
       productsLimit: 6,
+      defaultTheme: 'light',
+      showOfficialPaymentsModule: true,
     };
   });
+
+  useEffect(() => {
+    if (branding.defaultTheme) {
+      setIsDarkMode(branding.defaultTheme === 'dark');
+    }
+  }, [branding.defaultTheme]);
 
   useEffect(() => {
     localStorage.setItem('digimarket_shop_branding', JSON.stringify(branding));
@@ -558,6 +570,7 @@ export default function App() {
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
   const [isComplaintModalOpen, setIsComplaintModalOpen] = useState(false);
   const [isWishlistOpen, setIsWishlistOpen] = useState(false);
+  const [copiedPaymentId, setCopiedPaymentId] = useState<string | null>(null);
 
   // Pojok Silaturahmi Chat States
   const [isChatOpen, setIsChatOpen] = useState(true);
@@ -2004,6 +2017,136 @@ export default function App() {
                 </div>
               );
             })()}
+
+            {/* Module: Metode Pembayaran Resmi Terverifikasi */}
+            {branding.showOfficialPaymentsModule !== false && (
+              <div className="mt-12 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-3xl p-6 md:p-8 shadow-xs space-y-6">
+              <div className="border-b border-slate-100 dark:border-slate-800 pb-4">
+                <h3 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
+                  💳 Metode Pembayaran Resmi Terverifikasi
+                </h3>
+                <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
+                  Kami menyediakan berbagai alternatif rekening pembayaran resmi yang aktif & aman. Seluruh perubahan dikonfigurasi melalui panel Admin System.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                {paymentMethods.filter(method => method.isActive && ['pay-bca', 'pay-bank-transfer', 'pay-blu', 'pay-bni', 'pay-dana'].some(id => method.id === id || method.name.toLowerCase().includes('bca') || method.name.toLowerCase().includes('blu') || method.name.toLowerCase().includes('bni') || method.name.toLowerCase().includes('dana'))).map((method) => {
+                  const getBrandLogo = (id: string, name: string) => {
+                    const normId = id.toLowerCase();
+                    const normName = name.toLowerCase();
+                    
+                    if (normId.includes('bca') || normName.includes('bca')) {
+                      if (normId.includes('blu') || normName.includes('blu')) {
+                        return (
+                          <div className="flex items-center justify-center bg-[#00d0f5] text-[#002f5c] w-20 h-9 rounded-lg font-sans font-black tracking-normal text-[14px] shadow-xs select-none">
+                            blu
+                          </div>
+                        );
+                      }
+                      return (
+                        <div className="flex items-center justify-center bg-[#0052a3] text-white w-20 h-9 rounded-md font-sans tracking-wider italic font-extrabold text-[14px] shadow-xs select-none">
+                          BCA
+                        </div>
+                      );
+                    }
+                    
+                    if (normId.includes('blu') || normName.includes('blu')) {
+                      return (
+                        <div className="flex items-center justify-center bg-[#00d0f5] text-[#002f5c] w-20 h-9 rounded-lg font-sans font-black tracking-normal text-[14px] shadow-xs select-none">
+                          blu
+                        </div>
+                      );
+                    }
+                    
+                    if (normId.includes('bni') || normName.includes('bni')) {
+                      return (
+                        <div className="flex items-center justify-center bg-teal-600 border-r-4 border-orange-500 text-white w-20 h-9 rounded-md font-sans tracking-tight font-extrabold text-[13px] shadow-xs select-none">
+                          BNI
+                        </div>
+                      );
+                    }
+                    
+                    if (normId.includes('dana') || normName.includes('dana')) {
+                      return (
+                        <div className="flex items-center justify-center bg-[#108ee9] text-white w-20 h-9 rounded-lg font-sans font-black tracking-wide text-[14px] shadow-xs select-none">
+                          DANA
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="flex items-center justify-center bg-slate-800 text-white w-20 h-9 rounded-lg font-sans font-black tracking-wide text-[11px] shadow-xs select-none">
+                        PAY
+                      </div>
+                    );
+                  };
+
+                  const handleCopy = (text: string, id: string) => {
+                    try {
+                      navigator.clipboard.writeText(text);
+                      setCopiedPaymentId(id);
+                      setTimeout(() => setCopiedPaymentId(null), 2000);
+                    } catch (err) {
+                      const textarea = document.createElement('textarea');
+                      textarea.value = text;
+                      document.body.appendChild(textarea);
+                      textarea.select();
+                      document.execCommand('copy');
+                      document.body.removeChild(textarea);
+                      setCopiedPaymentId(id);
+                      setTimeout(() => setCopiedPaymentId(null), 2000);
+                    }
+                  };
+
+                  return (
+                    <div key={method.id} className="bg-slate-50 dark:bg-slate-850 border border-slate-100 dark:border-slate-800 p-5 rounded-2xl flex flex-col justify-between space-y-4 hover:shadow-md transition-all">
+                      <div className="flex items-center justify-between gap-4">
+                        {getBrandLogo(method.id, method.name)}
+                        <span className="text-[10px] font-black uppercase text-slate-400 dark:text-slate-500 bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 px-2.5 py-1 rounded-md">
+                          {method.name.includes('Transfer') || method.name.includes('Virtual') ? 'Bank' : 'E-Wallet'}
+                        </span>
+                      </div>
+
+                      <div className="space-y-1">
+                        <h4 className="text-xs font-black text-slate-850 dark:text-slate-100">{method.name}</h4>
+                        <p className="text-[10.5px] font-medium text-slate-400 dark:text-slate-500 leading-snug line-clamp-2">
+                          {method.description}
+                        </p>
+                      </div>
+
+                      <div className="bg-white dark:bg-slate-900/50 p-3 rounded-xl border border-slate-100 dark:border-slate-800 space-y-2">
+                        <div>
+                          <span className="block text-[8px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-wider">Nomor Rekening / ID</span>
+                          <div className="flex items-center justify-between gap-1.5 mt-0.5">
+                            <span className="text-xs font-mono font-bold text-slate-800 dark:text-slate-100 select-all">{method.accountNumber}</span>
+                            <button
+                              onClick={() => handleCopy(method.accountNumber, method.id)}
+                              className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 rounded-lg transition-all cursor-pointer"
+                              title="Salin Nomor"
+                            >
+                              {copiedPaymentId === method.id ? (
+                                <Check className="w-3.5 h-3.5 text-emerald-500" />
+                              ) : (
+                                <Copy className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="border-t border-slate-100/50 dark:border-slate-800 pt-1.5">
+                          <span className="block text-[8px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-wider">Atas Nama</span>
+                          <span className="text-xs font-extrabold text-slate-700 dark:text-slate-200 block mt-0.5 leading-snug truncate">
+                            {method.accountName}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            )}
           </div>
         )}
 
